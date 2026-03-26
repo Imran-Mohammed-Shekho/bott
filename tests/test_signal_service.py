@@ -31,3 +31,10 @@ def test_signal_service_returns_all_horizons() -> None:
     assert set(response.signals.keys()) == set(HORIZONS)
     for horizon_signal in response.signals.values():
         assert 0.0 <= horizon_signal.confidence <= 1.0
+
+
+def test_mock_alias_normalizes_to_rule_based() -> None:
+    """Legacy mock config should map to the rule-based engine."""
+
+    app_context = build_app_context()
+    assert app_context.settings.prediction_provider == "rule_based"

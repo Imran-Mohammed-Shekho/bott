@@ -9,10 +9,10 @@ from app.data.oanda_market_data import OandaMarketDataProvider
 from app.data.oanda_trading import OandaTradingProvider
 from app.features.engineering import FeatureEngineer
 from app.models.interfaces import AbstractPredictionProvider
-from app.models.model_loader import JoblibModelLoader, MockModelLoader
+from app.models.model_loader import JoblibModelLoader
 from app.persistence.supabase import SupabasePersistence
 from app.services.market_data_service import MarketDataService
-from app.services.prediction_service import MockPredictionProvider, SklearnPredictionProvider
+from app.services.prediction_service import RuleBasedPredictionProvider, SklearnPredictionProvider
 from app.services.signal_service import SignalService
 from app.services.subscriptions import SubscriptionService
 from app.services.trading_service import TradingService
@@ -86,7 +86,7 @@ def _build_prediction_provider(settings: Settings) -> AbstractPredictionProvider
 
     if settings.prediction_provider == "sklearn":
         return SklearnPredictionProvider(JoblibModelLoader(settings.resolved_model_dir))
-    return MockPredictionProvider(MockModelLoader())
+    return RuleBasedPredictionProvider()
 
 
 def _build_persistence(settings: Settings) -> Optional[SupabasePersistence]:

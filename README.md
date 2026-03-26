@@ -2,7 +2,7 @@
 
 Production-minded Telegram bot and FastAPI backend for forex trading signals. The project can run in:
 
-- `mock` mode for local development
+- `rule_based` mode for deterministic strategy signals
 - `oanda` mode for live market data
 - `sklearn` mode for real trained model inference
 - `paper` trade mode for safe execution rehearsal
@@ -13,7 +13,7 @@ Production-minded Telegram bot and FastAPI backend for forex trading signals. Th
 - `30s`
 - `1m`
 
-The prediction layer is modular, so you can swap between mock mode and live/provider-backed mode without rewriting the bot.
+The prediction layer is modular, so you can swap between the rule-based engine and trained-model inference without rewriting the bot.
 
 ## Features
 
@@ -38,7 +38,7 @@ The prediction layer is modular, so you can swap between mock mode and live/prov
 - Render deployment blueprint in `render.yaml`
 - Sentry initialization for production monitoring
 - Feature engineering module
-- Mock multi-horizon prediction provider
+- Rule-based multi-horizon prediction provider
 - Joblib-backed sklearn prediction provider
 - Model loader abstraction for future real model integration
 - In-memory subscription tracking for scheduled alerts
@@ -131,14 +131,14 @@ Local demo:
 
 ```env
 MARKET_DATA_PROVIDER=mock
-PREDICTION_PROVIDER=mock
+PREDICTION_PROVIDER=rule_based
 ```
 
 Live market data with OANDA:
 
 ```env
 MARKET_DATA_PROVIDER=oanda
-PREDICTION_PROVIDER=mock
+PREDICTION_PROVIDER=rule_based
 OANDA_API_TOKEN=your_oanda_api_token
 OANDA_ACCOUNT_ID=your_oanda_account_id
 OANDA_BASE_URL=https://api-fxpractice.oanda.com/v3
@@ -156,7 +156,7 @@ Production stack:
 
 ```env
 MARKET_DATA_PROVIDER=oanda
-PREDICTION_PROVIDER=mock
+PREDICTION_PROVIDER=rule_based
 TRADE_MODE=paper
 DATABASE_URL=postgresql://...
 SENTRY_DSN=https://...
@@ -277,6 +277,7 @@ Each artifact can be either:
 - Set `ADMIN_TELEGRAM_USER_IDS_CSV` so only your Telegram account can trade
 - Apply `infra/supabase/schema.sql` if you want to create tables manually
 - Point Telegram webhook to `/telegram/webhook`
+- `PREDICTION_PROVIDER=mock` is still accepted as a backward-compatible alias for `rule_based`
 
 Example protected market order:
 

@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     admin_telegram_user_ids_csv: str = ""
     admin_api_key: Optional[str] = None
     market_data_provider: str = "mock"
-    prediction_provider: str = "mock"
+    prediction_provider: str = "rule_based"
     trade_mode: str = "paper"
     default_order_units: int = 100
     max_order_units: int = 1000
@@ -114,8 +114,10 @@ class Settings(BaseSettings):
         """Restrict prediction provider choices."""
 
         normalized = value.strip().lower()
-        if normalized not in {"mock", "sklearn"}:
-            raise ValueError("PREDICTION_PROVIDER must be 'mock' or 'sklearn'.")
+        if normalized == "mock":
+            return "rule_based"
+        if normalized not in {"rule_based", "sklearn"}:
+            raise ValueError("PREDICTION_PROVIDER must be 'rule_based', 'mock', or 'sklearn'.")
         return normalized
 
     @validator("trade_mode")

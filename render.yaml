@@ -30,7 +30,7 @@ services:
       - key: MARKET_DATA_PROVIDER
         value: oanda
       - key: PREDICTION_PROVIDER
-        value: mock
+        value: rule_based
       - key: TRADE_MODE
         value: paper
       - key: LOOKBACK_SECONDS

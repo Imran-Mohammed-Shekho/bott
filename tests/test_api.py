@@ -22,7 +22,7 @@ def test_health_endpoint() -> None:
     assert payload["status"] == "ok"
     assert payload["supported_pairs"] >= 1
     assert payload["market_data_provider"] in {"mock", "oanda"}
-    assert payload["prediction_provider"] in {"mock", "sklearn"}
+    assert payload["prediction_provider"] in {"rule_based", "sklearn"}
 
 
 def test_signal_endpoint_returns_expected_shape() -> None:
