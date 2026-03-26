@@ -1,0 +1,67 @@
+services:
+  - type: web
+    name: forex-signals-bot
+    runtime: python
+    plan: starter
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app.main:app --bind 0.0.0.0:$PORT --workers 1 --worker-class uvicorn.workers.UvicornWorker --timeout 180
+    healthCheckPath: /api/v1/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: ENVIRONMENT
+        value: production
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_URL
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: ADMIN_API_KEY
+        sync: false
+      - key: ADMIN_TELEGRAM_USER_IDS_CSV
+        sync: false
+      - key: MARKET_DATA_PROVIDER
+        value: oanda
+      - key: PREDICTION_PROVIDER
+        value: mock
+      - key: TRADE_MODE
+        value: paper
+      - key: LOOKBACK_SECONDS
+        value: 300
+      - key: DEFAULT_ORDER_UNITS
+        value: 100
+      - key: MAX_ORDER_UNITS
+        value: 1000
+      - key: MAX_OPEN_POSITIONS
+        value: 3
+      - key: MAX_DAILY_LOSS_PERCENT
+        value: 2.0
+      - key: MAX_MARGIN_CLOSEOUT_PERCENT
+        value: 0.5
+      - key: DATABASE_POOL_SIZE
+        value: 5
+      - key: DATABASE_COMMAND_TIMEOUT_SECONDS
+        value: 15
+      - key: OANDA_ENVIRONMENT
+        value: practice
+      - key: OANDA_BASE_URL
+        value: https://api-fxpractice.oanda.com/v3
+      - key: DISPLAY_TIMEZONE
+        value: Asia/Baghdad
+      - key: BROKER_STYLE
+        value: pocket_option
+      - key: SENTRY_TRACES_SAMPLE_RATE
+        value: 0.2
+      - key: SENTRY_PROFILES_SAMPLE_RATE
+        value: 0.0
+      - key: OANDA_API_TOKEN
+        sync: false
+      - key: OANDA_ACCOUNT_ID
+        sync: false
