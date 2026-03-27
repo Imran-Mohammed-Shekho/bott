@@ -285,6 +285,8 @@ async def connect_page(token: str, request: Request) -> HTMLResponse:
       .status {{ margin-top: 16px; white-space: pre-wrap; padding: 12px; border-radius: 8px; background: #f4f4f4; }}
       .hint {{ font-size: 14px; color: #666; margin-top: -8px; margin-bottom: 16px; }}
       .steps {{ background: #f9f9ff; border: 1px solid #dfe4ff; border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; }}
+      .panel {{ background: #fcfcfc; border: 1px solid #e5e5e5; border-radius: 12px; padding: 14px; margin-top: 16px; }}
+      .panel h2 {{ margin-top: 0; }}
       .screen-box {{ position: relative; }}
       .tap-marker {{
         position: absolute;
@@ -298,6 +300,7 @@ async def connect_page(token: str, request: Request) -> HTMLResponse:
         display: none;
       }}
       .toolbar {{ margin: 12px 0; display: flex; gap: 8px; flex-wrap: wrap; }}
+      .big-button {{ min-width: 180px; font-weight: 600; }}
     </style>
   </head>
   <body>
@@ -318,34 +321,54 @@ async def connect_page(token: str, request: Request) -> HTMLResponse:
       <img id="screen" alt="Remote browser screen" />
       <div id="tap_marker" class="tap-marker"></div>
     </div>
-    <div class="toolbar">
-      <button id="refresh_button">Refresh Screen</button>
-      <button id="scroll_down">Scroll Down</button>
-      <button id="scroll_up">Scroll Up</button>
-      <button data-key="Tab">Tab</button>
-      <button data-key="Enter">Enter</button>
-      <button data-key="Backspace">Backspace</button>
+    <div class="panel">
+      <h2>Login Steps</h2>
+      <p><strong>Step 1:</strong> Tap the email/username field inside the screenshot.</p>
+      <div class="row">
+        <div>
+          <label>Email / Username</label>
+          <input id="type_text" type="text" placeholder="Type email or username here" />
+          <div class="hint">After tapping the email field in the screenshot, press Send Email / Username.</div>
+        </div>
+        <div style="display:flex;align-items:end;">
+          <button id="type_button" class="big-button">Send Email / Username</button>
+        </div>
+      </div>
+      <p><strong>Step 2:</strong> Move to the password field.</p>
+      <div class="toolbar">
+        <button id="tab_to_password" class="big-button">Go To Password Field</button>
+      </div>
+      <p><strong>Step 3:</strong> Enter password.</p>
+      <div class="row">
+        <div>
+          <label>Password</label>
+          <input id="password_text" type="password" placeholder="Type password here" />
+          <div class="hint">If the password field is already focused, just press Send Password.</div>
+        </div>
+        <div style="display:flex;align-items:end;">
+          <button id="password_button" class="big-button">Send Password</button>
+        </div>
+      </div>
+      <p><strong>Step 4:</strong> Submit the login form.</p>
+      <div class="toolbar">
+        <button id="submit_login" class="big-button">Submit Login Form</button>
+        <button id="backspace_button">Delete Last Character</button>
+      </div>
+      <p><strong>If the login button is visible lower on the page:</strong> use scroll, then tap the login button directly inside the screenshot.</p>
     </div>
-    <div class="row">
-      <div>
-        <label>Email / Username / Generic Text</label>
-        <input id="type_text" type="text" placeholder="Type normal text here" />
-        <div class="hint">Tap a field in the screenshot first, then type here, then press Send Text.</div>
-      </div>
-      <div style="display:flex;align-items:end;">
-        <button id="type_button">Send Text</button>
-      </div>
-    </div>
-    <div class="row">
-      <div>
-        <label>Password</label>
-        <input id="password_text" type="password" placeholder="Type password here" />
-        <div class="hint">Tap the password field in the screenshot first, then press Send Password.</div>
-      </div>
-      <div style="display:flex;align-items:end;">
-        <button id="password_button">Send Password</button>
+    <div class="panel">
+      <h2>Remote Browser Controls</h2>
+      <div class="toolbar">
+        <button id="refresh_button">Refresh Screen</button>
+        <button id="scroll_down">Scroll Down</button>
+        <button id="scroll_up">Scroll Up</button>
+        <button data-key="Tab">Tab</button>
+        <button data-key="Enter">Enter</button>
+        <button data-key="Backspace">Backspace</button>
       </div>
     </div>
+    <div class="panel">
+      <h2>Autotrade Settings After Login</h2>
     <label>Trade amount</label>
     <input id="trade_amount" type="number" min="1" value="1" />
     <div class="hint">This is the amount the bot will use later when executing orders for this user.</div>
@@ -361,6 +384,7 @@ async def connect_page(token: str, request: Request) -> HTMLResponse:
     </select>
     <div class="hint">This tells the bot which signal horizon to use for automatic execution.</div>
     <label><input id="autotrade_enabled" type="checkbox" /> Enable autotrade after saving this session</label>
+    </div>
     <div>
       <button id="submit">Save Session</button>
       <button id="cancel">Close Session</button>
@@ -407,7 +431,16 @@ async def connect_page(token: str, request: Request) -> HTMLResponse:
           headers: {{ "Content-Type": "application/json" }},
           body: JSON.stringify({{ text }}),
         }});
-        targetLabel.textContent = "Sent normal text to the focused field";
+        targetLabel.textContent = "Sent email / username to the focused field";
+        setTimeout(refreshScreen, 400);
+      }});
+      document.getElementById("tab_to_password").addEventListener("click", async () => {{
+        await fetch("/api/v1/connect/{token}/key", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ key: "Tab" }}),
+        }});
+        targetLabel.textContent = "Moved focus to the next field, usually password";
         setTimeout(refreshScreen, 400);
       }});
       document.getElementById("password_button").addEventListener("click", async () => {{
@@ -417,7 +450,25 @@ async def connect_page(token: str, request: Request) -> HTMLResponse:
           headers: {{ "Content-Type": "application/json" }},
           body: JSON.stringify({{ text }}),
         }});
-        targetLabel.textContent = "Sent password text to the focused field";
+        targetLabel.textContent = "Sent password to the focused field";
+        setTimeout(refreshScreen, 400);
+      }});
+      document.getElementById("submit_login").addEventListener("click", async () => {{
+        await fetch("/api/v1/connect/{token}/key", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ key: "Enter" }}),
+        }});
+        targetLabel.textContent = "Submitted login form with Enter";
+        setTimeout(refreshScreen, 400);
+      }});
+      document.getElementById("backspace_button").addEventListener("click", async () => {{
+        await fetch("/api/v1/connect/{token}/key", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ key: "Backspace" }}),
+        }});
+        targetLabel.textContent = "Deleted one character from the focused field";
         setTimeout(refreshScreen, 400);
       }});
       document.querySelectorAll("[data-key]").forEach((button) => {{
