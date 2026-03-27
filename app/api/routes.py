@@ -12,6 +12,7 @@ from app.models.execution import (
     ExecutionProfileStatus,
     RemoteBrowserClickRequest,
     RemoteBrowserKeyRequest,
+    RemoteBrowserLoginRequest,
     RemoteBrowserScrollRequest,
     RemoteBrowserTypeRequest,
 )
@@ -322,44 +323,41 @@ async def connect_page(token: str, request: Request) -> HTMLResponse:
       <div id="tap_marker" class="tap-marker"></div>
     </div>
     <div class="panel">
-      <h2>Login Steps</h2>
-      <p><strong>Step 1:</strong> Tap the email/username field inside the screenshot.</p>
+      <h2>Fast Login</h2>
+      <p>Type the account credentials here, then press <strong>Login To Website</strong>. The server will try to fill the login form for you.</p>
       <div class="row">
         <div>
           <label>Email / Username</label>
           <input id="type_text" type="text" placeholder="Type email or username here" />
-          <div class="hint">After tapping the email field in the screenshot, press Send Email / Username.</div>
+          <div class="hint">This is for the Pocket Option login screen.</div>
         </div>
         <div style="display:flex;align-items:end;">
-          <button id="type_button" class="big-button">Send Email / Username</button>
+          <button id="login_button" class="big-button">Login To Website</button>
         </div>
       </div>
-      <p><strong>Step 2:</strong> Move to the password field.</p>
-      <div class="toolbar">
-        <button id="tab_to_password" class="big-button">Go To Password Field</button>
-      </div>
-      <p><strong>Step 3:</strong> Enter password.</p>
       <div class="row">
         <div>
           <label>Password</label>
           <input id="password_text" type="password" placeholder="Type password here" />
-          <div class="hint">If the password field is already focused, just press Send Password.</div>
+          <div class="hint">If automatic login fails, use the fallback manual controls below.</div>
         </div>
         <div style="display:flex;align-items:end;">
-          <button id="password_button" class="big-button">Send Password</button>
+          <button id="refresh_button" class="big-button">Refresh Screen</button>
         </div>
       </div>
-      <p><strong>Step 4:</strong> Submit the login form.</p>
-      <div class="toolbar">
-        <button id="submit_login" class="big-button">Submit Login Form</button>
-        <button id="backspace_button">Delete Last Character</button>
-      </div>
-      <p><strong>If the login button is visible lower on the page:</strong> use scroll, then tap the login button directly inside the screenshot.</p>
+      <p><strong>If the page changes after login, wait 2-3 seconds and check the screenshot.</strong></p>
     </div>
     <div class="panel">
-      <h2>Remote Browser Controls</h2>
+      <h2>Fallback Manual Controls</h2>
+      <p>If automatic login does not work on the current Pocket Option screen, use these manual controls.</p>
       <div class="toolbar">
-        <button id="refresh_button">Refresh Screen</button>
+        <button id="type_button" class="big-button">Send Text To Focused Field</button>
+        <button id="tab_to_password" class="big-button">Go To Next Field</button>
+        <button id="password_button" class="big-button">Send Password To Focused Field</button>
+        <button id="submit_login" class="big-button">Press Enter / Submit</button>
+        <button id="backspace_button">Delete Last Character</button>
+      </div>
+      <div class="toolbar">
         <button id="scroll_down">Scroll Down</button>
         <button id="scroll_up">Scroll Up</button>
         <button data-key="Tab">Tab</button>
@@ -423,6 +421,19 @@ async def connect_page(token: str, request: Request) -> HTMLResponse:
           body: JSON.stringify(payload),
         }});
         setTimeout(refreshScreen, 400);
+      }});
+      document.getElementById("login_button").addEventListener("click", async () => {{
+        status.textContent = "Trying automatic login...";
+        const response = await fetch("/api/v1/connect/{token}/login", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{
+            username: document.getElementById("type_text").value,
+            password: document.getElementById("password_text").value
+          }}),
+        }});
+        status.textContent = await response.text();
+        setTimeout(refreshScreen, 1200);
       }});
       document.getElementById("type_button").addEventListener("click", async () => {{
         const text = document.getElementById("type_text").value;
@@ -644,6 +655,26 @@ async def remote_connect_scroll(
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": "scrolled"}
+
+
+@router.post("/connect/{token}/login", include_in_schema=False)
+async def remote_connect_login(
+    token: str,
+    payload: RemoteBrowserLoginRequest,
+    request: Request,
+) -> dict:
+    """Attempt to log into the target website using typed credentials."""
+
+    app_context = get_app_context(request)
+    try:
+        await app_context.remote_browser_connect_service.attempt_login(
+            token=token,
+            username=payload.username,
+            password=payload.password,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "login_submitted"}
 
 
 @router.post("/connect/{token}/save", response_model=ExecutionProfileStatus, include_in_schema=False)

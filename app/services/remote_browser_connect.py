@@ -131,6 +131,75 @@ class RemoteBrowserConnectService:
         await session.page.mouse.wheel(0, delta_y)
         session.last_seen_at = datetime.now().astimezone()
 
+    async def attempt_login(self, token: str, username: str, password: str) -> None:
+        """Try to fill login fields and submit the form automatically."""
+
+        session = await self._require_session(token)
+        if not username.strip() or not password:
+            raise RuntimeError("Username and password are required.")
+
+        email_selectors = [
+            'input[type="email"]',
+            'input[name*="email" i]',
+            'input[id*="email" i]',
+            'input[placeholder*="email" i]',
+            'input[name*="login" i]',
+            'input[id*="login" i]',
+            'input[name*="user" i]',
+            'input[id*="user" i]',
+            'input[type="text"]',
+        ]
+        password_selectors = [
+            'input[type="password"]',
+            'input[name*="password" i]',
+            'input[id*="password" i]',
+        ]
+        submit_selectors = [
+            'button[type="submit"]',
+            'input[type="submit"]',
+            'button:has-text("Log in")',
+            'button:has-text("Login")',
+            'button:has-text("Sign in")',
+            'button:has-text("Continue")',
+        ]
+
+        email_field = None
+        for selector in email_selectors:
+            locator = session.page.locator(selector).first
+            if await locator.count():
+                email_field = locator
+                break
+        if email_field is None:
+            raise RuntimeError("Could not find the username/email field on the login page.")
+
+        password_field = None
+        for selector in password_selectors:
+            locator = session.page.locator(selector).first
+            if await locator.count():
+                password_field = locator
+                break
+        if password_field is None:
+            raise RuntimeError("Could not find the password field on the login page.")
+
+        await email_field.click()
+        await email_field.fill(username)
+        await password_field.click()
+        await password_field.fill(password)
+
+        submit_button = None
+        for selector in submit_selectors:
+            locator = session.page.locator(selector).first
+            if await locator.count():
+                submit_button = locator
+                break
+
+        if submit_button is not None:
+            await submit_button.click()
+        else:
+            await password_field.press("Enter")
+
+        session.last_seen_at = datetime.now().astimezone()
+
     async def save_session(
         self,
         token: str,

@@ -97,3 +97,10 @@ class RemoteBrowserScrollRequest(BaseModel):
     """Mouse-wheel style scroll request for the hosted browser."""
 
     delta_y: int
+
+
+class RemoteBrowserLoginRequest(BaseModel):
+    """Credential payload for one-click website login from the hosted browser page."""
+
+    username: str
+    password: str
