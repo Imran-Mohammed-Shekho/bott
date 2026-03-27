@@ -6,12 +6,14 @@ from typing import Optional
 from app.config.settings import Settings, get_settings
 from app.data.mock_market_data import MockMarketDataProvider
 from app.data.oanda_market_data import OandaMarketDataProvider
+from app.data.pocket_option_browser import PocketOptionBrowserProvider
 from app.data.oanda_trading import OandaTradingProvider
 from app.features.engineering import FeatureEngineer
-from app.models.interfaces import AbstractPredictionProvider
+from app.models.interfaces import AbstractExecutionProvider, AbstractPredictionProvider
 from app.models.model_loader import JoblibModelLoader
 from app.persistence.supabase import SupabasePersistence
 from app.services.access_control import AccessControlService
+from app.services.execution_profiles import ExecutionProfileService
 from app.services.market_data_service import MarketDataService
 from app.services.prediction_service import RuleBasedPredictionProvider, SklearnPredictionProvider
 from app.services.signal_service import SignalService
@@ -33,6 +35,7 @@ class AppContext:
     subscription_service: SubscriptionService
     trading_service: TradingService
     access_control_service: AccessControlService
+    execution_profile_service: ExecutionProfileService
     persistence: Optional[SupabasePersistence]
 
 
@@ -50,6 +53,7 @@ def build_app_context() -> AppContext:
     persistence = _build_persistence(settings)
     subscription_service = SubscriptionService(persistence=persistence)
     access_control_service = AccessControlService(settings=settings, persistence=persistence)
+    execution_profile_service = ExecutionProfileService(settings=settings, persistence=persistence)
     signal_service = SignalService(
         settings=settings,
         market_data_service=market_data_service,
@@ -61,7 +65,7 @@ def build_app_context() -> AppContext:
         signal_service=signal_service,
         market_data_service=market_data_service,
         persistence=persistence,
-        broker=_build_trading_provider(settings),
+        broker=_build_trading_provider(settings, execution_profile_service),
     )
 
     return AppContext(
@@ -73,6 +77,7 @@ def build_app_context() -> AppContext:
         subscription_service=subscription_service,
         trading_service=trading_service,
         access_control_service=access_control_service,
+        execution_profile_service=execution_profile_service,
         persistence=persistence,
     )
 
@@ -105,9 +110,14 @@ def _build_persistence(settings: Settings) -> Optional[SupabasePersistence]:
     )
 
 
-def _build_trading_provider(settings: Settings) -> Optional[OandaTradingProvider]:
+def _build_trading_provider(
+    settings: Settings,
+    execution_profile_service: ExecutionProfileService,
+) -> Optional[AbstractExecutionProvider]:
     """Create the broker execution provider when credentials exist."""
 
+    if settings.execution_provider == "pocket_option_browser":
+        return PocketOptionBrowserProvider(settings, execution_profile_service)
     if not settings.oanda_api_token or not settings.oanda_account_id:
         return None
     return OandaTradingProvider(settings)

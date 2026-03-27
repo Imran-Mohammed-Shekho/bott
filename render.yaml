@@ -13,6 +13,8 @@ services:
         value: 3.11.9
       - key: ENVIRONMENT
         value: production
+      - key: PUBLIC_APP_URL
+        sync: false
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_WEBHOOK_URL
@@ -27,12 +29,16 @@ services:
         sync: false
       - key: ADMIN_TELEGRAM_USER_IDS_CSV
         sync: false
+      - key: SESSION_ENCRYPTION_KEY
+        sync: false
       - key: MARKET_DATA_PROVIDER
         value: oanda
       - key: PREDICTION_PROVIDER
         value: rule_based
       - key: TRADE_MODE
         value: paper
+      - key: EXECUTION_PROVIDER
+        value: oanda
       - key: LOOKBACK_SECONDS
         value: 300
       - key: DEFAULT_ORDER_UNITS
@@ -49,6 +55,8 @@ services:
         value: 5
       - key: DATABASE_COMMAND_TIMEOUT_SECONDS
         value: 15
+      - key: CONNECT_TOKEN_TTL_MINUTES
+        value: 30
       - key: OANDA_ENVIRONMENT
         value: practice
       - key: OANDA_BASE_URL

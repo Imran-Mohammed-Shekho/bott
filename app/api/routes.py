@@ -4,8 +4,10 @@ import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 
 from app.bootstrap import AppContext
+from app.models.execution import ConnectExecutionRequest, ExecutionProfileStatus
 from app.models.signal import (
     HealthResponse,
     PairsResponse,
@@ -234,3 +236,105 @@ async def recent_trades(
 
     app_context = get_app_context(request)
     return await app_context.trading_service.list_recent_trades(limit=limit)
+
+
+@router.get("/execution/profile/{user_id}", response_model=ExecutionProfileStatus, dependencies=[Depends(require_admin_key)])
+async def execution_profile(user_id: int, request: Request) -> ExecutionProfileStatus:
+    """Return the stored execution profile status for a user."""
+
+    app_context = get_app_context(request)
+    profile = await app_context.execution_profile_service.get_profile_status(user_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Execution profile not found.")
+    return profile
+
+
+@router.get("/connect/{token}", response_class=HTMLResponse, include_in_schema=False)
+async def connect_page(token: str, request: Request) -> HTMLResponse:
+    """Serve a minimal secure session-connect page."""
+
+    app_context = get_app_context(request)
+    connect_token = await app_context.execution_profile_service.get_connect_token(token)
+    if connect_token is None or not connect_token.is_active or connect_token.used_at is not None:
+        raise HTTPException(status_code=404, detail="Connect link is invalid or expired.")
+
+    html = f"""
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Connect Pocket Option Session</title>
+    <style>
+      body {{ font-family: sans-serif; max-width: 760px; margin: 40px auto; padding: 0 16px; }}
+      textarea, input, select {{ width: 100%; margin-top: 8px; margin-bottom: 16px; }}
+      textarea {{ min-height: 260px; }}
+      button {{ padding: 12px 18px; cursor: pointer; }}
+      .status {{ margin-top: 16px; white-space: pre-wrap; }}
+    </style>
+  </head>
+  <body>
+    <h1>Connect Pocket Option Session</h1>
+    <p>Paste a valid Playwright storage state JSON for your Pocket Option session.</p>
+    <label>Storage state JSON</label>
+    <textarea id="storage_state" placeholder='{{"cookies":[],"origins":[]}}'></textarea>
+    <label>Trade amount</label>
+    <input id="trade_amount" type="number" min="1" value="1" />
+    <label>Expiration label</label>
+    <input id="expiration_label" type="text" value="M5" />
+    <label>Signal horizon</label>
+    <select id="signal_horizon">
+      <option value="5s">5s</option>
+      <option value="10s">10s</option>
+      <option value="30s">30s</option>
+      <option value="1m" selected>1m</option>
+    </select>
+    <label><input id="autotrade_enabled" type="checkbox" /> Enable autotrade</label>
+    <div>
+      <button id="submit">Save Session</button>
+    </div>
+    <div id="status" class="status"></div>
+    <script>
+      document.getElementById("submit").addEventListener("click", async () => {{
+        const payload = {{
+          storage_state: document.getElementById("storage_state").value,
+          trade_amount: Number(document.getElementById("trade_amount").value || "1"),
+          expiration_label: document.getElementById("expiration_label").value,
+          signal_horizon: document.getElementById("signal_horizon").value,
+          autotrade_enabled: document.getElementById("autotrade_enabled").checked,
+        }};
+        const response = await fetch("/api/v1/connect/{token}", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify(payload),
+        }});
+        const text = await response.text();
+        document.getElementById("status").textContent = text;
+      }});
+    </script>
+  </body>
+</html>
+"""
+    return HTMLResponse(html)
+
+
+@router.post("/connect/{token}", response_model=ExecutionProfileStatus, include_in_schema=False)
+async def connect_session(
+    token: str,
+    payload: ConnectExecutionRequest,
+    request: Request,
+) -> ExecutionProfileStatus:
+    """Consume a connect token and store the encrypted execution profile."""
+
+    app_context = get_app_context(request)
+    try:
+        return await app_context.execution_profile_service.connect_user(
+            token=token,
+            storage_state_json=payload.storage_state,
+            autotrade_enabled=payload.autotrade_enabled,
+            trade_amount=payload.trade_amount,
+            expiration_label=payload.expiration_label,
+            signal_horizon=payload.signal_horizon,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

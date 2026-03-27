@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.config.settings import Settings
+from app.models.interfaces import AbstractExecutionProvider
 from app.models.trading import (
     AccountSummary,
     ClosePositionRequest,
@@ -23,7 +24,7 @@ from app.models.trading import (
 from app.services.signal_service import SignalService
 
 
-class OandaTradingProvider:
+class OandaTradingProvider(AbstractExecutionProvider):
     """Execute market orders and read account state from OANDA."""
 
     def __init__(self, settings: Settings):

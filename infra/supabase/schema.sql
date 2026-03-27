@@ -60,3 +60,27 @@ create table if not exists bot_user_daily_usage (
 );
 
 create index if not exists idx_bot_user_daily_usage_date on bot_user_daily_usage (usage_date desc);
+
+create table if not exists execution_connect_tokens (
+    token text primary key,
+    user_id bigint not null,
+    created_at timestamptz not null default now(),
+    expires_at timestamptz not null,
+    used_at timestamptz,
+    is_active boolean not null default true
+);
+
+create index if not exists idx_execution_connect_tokens_user_id
+    on execution_connect_tokens (user_id, expires_at desc);
+
+create table if not exists user_execution_profiles (
+    user_id bigint primary key,
+    provider text not null,
+    encrypted_session text not null,
+    autotrade_enabled boolean not null default false,
+    trade_amount integer not null check (trade_amount > 0),
+    expiration_label text not null default 'M5',
+    signal_horizon text not null default '1m',
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);

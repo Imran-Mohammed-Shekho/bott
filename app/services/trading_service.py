@@ -7,7 +7,7 @@ from typing import List, Optional
 from uuid import uuid4
 
 from app.config.settings import Settings
-from app.data.oanda_trading import OandaTradingProvider
+from app.models.interfaces import AbstractExecutionProvider
 from app.models.trading import (
     AccountSummary,
     ClosePositionRequest,
@@ -32,7 +32,7 @@ class TradingService:
         signal_service: SignalService,
         market_data_service: MarketDataService,
         persistence: Optional[SupabasePersistence],
-        broker: Optional[OandaTradingProvider],
+        broker: Optional[AbstractExecutionProvider],
     ):
         self._settings = settings
         self._signal_service = signal_service
@@ -69,17 +69,18 @@ class TradingService:
             )
 
         if self._settings.trade_mode == TradeMode.LIVE.value:
-            account = await self.get_account_summary()
-            await self._enforce_live_risk_limits(account)
-            positions = await self.list_open_positions()
-            open_sides = sum(
-                int(position.long.units > 0) + int(abs(position.short.units) > 0)
-                for position in positions
-            )
-            if open_sides >= self._settings.max_open_positions:
-                raise RuntimeError(
-                    f"Max open positions reached ({self._settings.max_open_positions})."
+            if self._settings.execution_provider == "oanda":
+                account = await self.get_account_summary()
+                await self._enforce_live_risk_limits(account)
+                positions = await self.list_open_positions()
+                open_sides = sum(
+                    int(position.long.units > 0) + int(abs(position.short.units) > 0)
+                    for position in positions
                 )
+                if open_sides >= self._settings.max_open_positions:
+                    raise RuntimeError(
+                        f"Max open positions reached ({self._settings.max_open_positions})."
+                    )
 
             response = await self._require_broker().place_market_order(request)
         else:
@@ -192,7 +193,7 @@ class TradingService:
             return
         await self._persistence.record_trade(record)
 
-    def _require_broker(self) -> OandaTradingProvider:
+    def _require_broker(self) -> AbstractExecutionProvider:
         if self._broker is None:
-            raise RuntimeError("OANDA trading is not configured.")
+            raise RuntimeError("Live execution provider is not configured.")
         return self._broker

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    public_app_url: Optional[str] = None
     telegram_bot_token: Optional[str] = None
     telegram_webhook_url: Optional[str] = None
     telegram_webhook_secret: Optional[str] = None
@@ -24,6 +25,7 @@ class Settings(BaseSettings):
     market_data_provider: str = "mock"
     prediction_provider: str = "rule_based"
     trade_mode: str = "paper"
+    execution_provider: str = "oanda"
     default_order_units: int = 100
     max_order_units: int = 1000
     max_open_positions: int = 3
@@ -34,11 +36,25 @@ class Settings(BaseSettings):
     database_url: Optional[str] = None
     database_pool_size: int = 5
     database_command_timeout_seconds: float = 15.0
+    session_encryption_key: Optional[str] = None
+    connect_token_ttl_minutes: int = 30
     model_dir: str = "artifacts/models"
     oanda_environment: str = "practice"
     oanda_api_token: Optional[str] = None
     oanda_account_id: Optional[str] = None
     oanda_base_url: str = "https://api-fxpractice.oanda.com/v3"
+    pocket_option_base_url: str = "https://pocketoption.com/en/cabinet/demo-quick-high-low/"
+    pocket_option_storage_state_path: str = ".state/pocket_option.json"
+    pocket_option_headless: bool = True
+    pocket_option_trade_amount: int = 1
+    pocket_option_expiration_label: str = "M5"
+    pocket_option_asset_button_selector: Optional[str] = None
+    pocket_option_asset_search_selector: Optional[str] = None
+    pocket_option_asset_option_selector_template: Optional[str] = None
+    pocket_option_amount_input_selector: Optional[str] = None
+    pocket_option_buy_button_selector: Optional[str] = None
+    pocket_option_sell_button_selector: Optional[str] = None
+    pocket_option_expiration_selector: Optional[str] = None
     sentry_dsn: Optional[str] = None
     sentry_traces_sample_rate: float = 0.2
     sentry_profiles_sample_rate: float = 0.0
@@ -100,6 +116,14 @@ class Settings(BaseSettings):
             raise ValueError("DATABASE_COMMAND_TIMEOUT_SECONDS must be positive.")
         return value
 
+    @validator("connect_token_ttl_minutes")
+    def validate_connect_token_ttl(cls, value: int) -> int:
+        """Ensure connect tokens expire after a positive number of minutes."""
+
+        if value <= 0:
+            raise ValueError("CONNECT_TOKEN_TTL_MINUTES must be positive.")
+        return value
+
     @validator("market_data_provider")
     def validate_market_data_provider(cls, value: str) -> str:
         """Restrict market data provider choices."""
@@ -127,6 +151,15 @@ class Settings(BaseSettings):
         normalized = value.strip().lower()
         if normalized not in {"paper", "live"}:
             raise ValueError("TRADE_MODE must be 'paper' or 'live'.")
+        return normalized
+
+    @validator("execution_provider")
+    def validate_execution_provider(cls, value: str) -> str:
+        """Restrict execution provider choices."""
+
+        normalized = value.strip().lower()
+        if normalized not in {"oanda", "pocket_option_browser"}:
+            raise ValueError("EXECUTION_PROVIDER must be 'oanda' or 'pocket_option_browser'.")
         return normalized
 
     @validator("display_timezone")
@@ -159,6 +192,19 @@ class Settings(BaseSettings):
             return None
         if not normalized.startswith("https://"):
             raise ValueError("TELEGRAM_WEBHOOK_URL must start with https://")
+        return normalized
+
+    @validator("public_app_url")
+    def validate_public_app_url(cls, value: Optional[str]) -> Optional[str]:
+        """Normalize the public app base URL when configured."""
+
+        if value is None:
+            return value
+        normalized = value.strip().rstrip("/")
+        if not normalized:
+            return None
+        if not normalized.startswith(("https://", "http://")):
+            raise ValueError("PUBLIC_APP_URL must start with https:// or http://")
         return normalized
 
     @validator("telegram_webhook_secret")
@@ -205,6 +251,18 @@ class Settings(BaseSettings):
         """Return the configured model directory."""
 
         return Path(self.model_dir).expanduser()
+
+    @property
+    def resolved_public_app_url(self) -> Optional[str]:
+        """Resolve the public application URL for user-facing links."""
+
+        if self.public_app_url:
+            return self.public_app_url
+        if not self.telegram_webhook_url:
+            return None
+        if self.telegram_webhook_url.endswith("/telegram/webhook"):
+            return self.telegram_webhook_url[: -len("/telegram/webhook")]
+        return self.telegram_webhook_url
 
 
 @lru_cache(maxsize=1)

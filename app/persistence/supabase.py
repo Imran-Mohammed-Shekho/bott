@@ -10,6 +10,7 @@ from typing import List, Optional
 import asyncpg
 
 from app.models.access import AccessTokenRecord, UserAccessRecord
+from app.models.execution import ExecutionConnectToken, UserExecutionProfile
 from app.models.signal import SubscriptionRecord
 from app.models.trading import OrderSide, TradeMode, TradeRecord
 
@@ -300,6 +301,157 @@ class SupabasePersistence:
             )
         return int(row["request_count"])
 
+    async def create_execution_connect_token(
+        self,
+        record: ExecutionConnectToken,
+    ) -> ExecutionConnectToken:
+        """Persist a one-time connect token."""
+
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            await connection.execute(
+                """
+                insert into execution_connect_tokens (
+                    token,
+                    user_id,
+                    created_at,
+                    expires_at,
+                    used_at,
+                    is_active
+                )
+                values ($1, $2, $3, $4, $5, $6)
+                """,
+                record.token,
+                record.user_id,
+                record.created_at,
+                record.expires_at,
+                record.used_at,
+                record.is_active,
+            )
+        return record
+
+    async def consume_execution_connect_token(
+        self,
+        token: str,
+        consumed_at: datetime,
+    ) -> Optional[ExecutionConnectToken]:
+        """Consume a one-time connect token if it is still valid."""
+
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                row = await connection.fetchrow(
+                    """
+                    select *
+                    from execution_connect_tokens
+                    where token = $1
+                    for update
+                    """,
+                    token,
+                )
+                if (
+                    row is None
+                    or not row["is_active"]
+                    or row["used_at"] is not None
+                    or row["expires_at"] < consumed_at
+                ):
+                    return None
+
+                await connection.execute(
+                    """
+                    update execution_connect_tokens
+                    set used_at = $2,
+                        is_active = false
+                    where token = $1
+                    """,
+                    token,
+                    consumed_at,
+                )
+
+        return self._execution_connect_token_from_row(
+            row,
+            used_at=consumed_at,
+            is_active=False,
+        )
+
+    async def get_execution_connect_token(self, token: str) -> Optional[ExecutionConnectToken]:
+        """Return a connect token by value."""
+
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                select *
+                from execution_connect_tokens
+                where token = $1
+                """,
+                token,
+            )
+        if row is None:
+            return None
+        return self._execution_connect_token_from_row(row)
+
+    async def upsert_user_execution_profile(
+        self,
+        record: UserExecutionProfile,
+    ) -> UserExecutionProfile:
+        """Create or update a user's stored execution profile."""
+
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                insert into user_execution_profiles (
+                    user_id,
+                    provider,
+                    encrypted_session,
+                    autotrade_enabled,
+                    trade_amount,
+                    expiration_label,
+                    signal_horizon,
+                    created_at,
+                    updated_at
+                )
+                values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                on conflict (user_id) do update
+                set provider = excluded.provider,
+                    encrypted_session = excluded.encrypted_session,
+                    autotrade_enabled = excluded.autotrade_enabled,
+                    trade_amount = excluded.trade_amount,
+                    expiration_label = excluded.expiration_label,
+                    signal_horizon = excluded.signal_horizon,
+                    updated_at = excluded.updated_at
+                returning *
+                """,
+                record.user_id,
+                record.provider,
+                record.encrypted_session,
+                record.autotrade_enabled,
+                record.trade_amount,
+                record.expiration_label,
+                record.signal_horizon,
+                record.created_at,
+                record.updated_at,
+            )
+        return self._user_execution_profile_from_row(row)
+
+    async def get_user_execution_profile(self, user_id: int) -> Optional[UserExecutionProfile]:
+        """Return a user's stored execution profile."""
+
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                select *
+                from user_execution_profiles
+                where user_id = $1
+                """,
+                user_id,
+            )
+        if row is None:
+            return None
+        return self._user_execution_profile_from_row(row)
+
     async def remove_subscription(self, chat_id: int, pair: str) -> bool:
         """Delete a subscription."""
 
@@ -464,4 +616,34 @@ class SupabasePersistence:
             is_active=row["is_active"],
             granted_via_token=row["granted_via_token"],
             granted_at=row["granted_at"],
+        )
+
+    @staticmethod
+    def _execution_connect_token_from_row(
+        row: asyncpg.Record,
+        *,
+        used_at: Optional[datetime] = None,
+        is_active: Optional[bool] = None,
+    ) -> ExecutionConnectToken:
+        return ExecutionConnectToken(
+            token=row["token"],
+            user_id=row["user_id"],
+            created_at=row["created_at"],
+            expires_at=row["expires_at"],
+            used_at=row["used_at"] if used_at is None else used_at,
+            is_active=row["is_active"] if is_active is None else is_active,
+        )
+
+    @staticmethod
+    def _user_execution_profile_from_row(row: asyncpg.Record) -> UserExecutionProfile:
+        return UserExecutionProfile(
+            user_id=row["user_id"],
+            provider=row["provider"],
+            encrypted_session=row["encrypted_session"],
+            autotrade_enabled=row["autotrade_enabled"],
+            trade_amount=row["trade_amount"],
+            expiration_label=row["expiration_label"],
+            signal_horizon=row["signal_horizon"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
         )

@@ -18,6 +18,7 @@ from app.bot.formatter import (
     format_access_token,
     format_account_summary,
     format_close_position_response,
+    format_execution_profile,
     format_help_message,
     format_market_order_response,
     format_pairs,
@@ -42,6 +43,7 @@ from app.bot.keyboards import (
 )
 from app.services.access_control import AccessDeniedError, QuotaExceededError
 from app.models.trading import ClosePositionRequest, MarketOrderRequest, OrderSide, PositionCloseSide
+from app.models.signal import SignalLabel
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,12 @@ def build_telegram_application(app_context: AppContext) -> Application:
     application.add_handler(CommandHandler("watch", watch_command))
     application.add_handler(CommandHandler("stopwatch", stopwatch_command))
     application.add_handler(CommandHandler("status", status_command))
+    application.add_handler(CommandHandler("connect", connect_command))
+    application.add_handler(CommandHandler("profile", profile_command))
+    application.add_handler(CommandHandler("autotrade", autotrade_command))
+    application.add_handler(CommandHandler("amount", amount_command))
+    application.add_handler(CommandHandler("expiry", expiry_command))
+    application.add_handler(CommandHandler("horizon", horizon_command))
     application.add_handler(CommandHandler("redeem", redeem_command))
     application.add_handler(CommandHandler("quota", quota_command))
     application.add_handler(CommandHandler("grant", grant_command))
@@ -71,6 +79,7 @@ def build_telegram_application(app_context: AppContext) -> Application:
     application.add_handler(CommandHandler("disableuser", disableuser_command))
     application.add_handler(CommandHandler("account", account_command))
     application.add_handler(CommandHandler("positions", positions_command))
+    application.add_handler(CommandHandler("execsignal", execsignal_command))
     application.add_handler(CommandHandler("buy", buy_command))
     application.add_handler(CommandHandler("sell", sell_command))
     application.add_handler(CommandHandler("close", close_position_command))
@@ -108,6 +117,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "\n/disableuser 123456789 - disable bot access"
             "\n/account - account summary"
             "\n/positions - open positions"
+            "\n/execsignal EURUSD [1m] [1] - trade current signal"
             "\n/buy EURUSD 100"
             "\n/sell EURUSD 100"
             "\n/close EURUSD [all|long|short]"
@@ -317,6 +327,148 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await _reply(update, format_status(records), reply_markup=build_main_menu_keyboard())
 
 
+async def connect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /connect by issuing a one-time secure session link."""
+
+    app_context = _app_context(context)
+    if update.effective_user is None:
+        return
+
+    try:
+        token = await app_context.execution_profile_service.issue_connect_token(
+            update.effective_user.id
+        )
+        connect_url = app_context.execution_profile_service.build_connect_url(token.token)
+    except RuntimeError as exc:
+        await _reply(update, str(exc), reply_markup=build_main_menu_keyboard())
+        return
+
+    await _reply(
+        update,
+        "\n".join(
+            [
+                "Open this secure link and paste your Pocket Option Playwright storage state JSON:",
+                f"{connect_url}",
+                f"Link expires in {app_context.settings.connect_token_ttl_minutes} minutes.",
+            ]
+        ),
+        reply_markup=build_main_menu_keyboard(),
+    )
+
+
+async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /profile for the sender's execution profile."""
+
+    app_context = _app_context(context)
+    if update.effective_user is None:
+        return
+
+    status = await app_context.execution_profile_service.get_profile_status(update.effective_user.id)
+    if status is None:
+        await _reply(
+            update,
+            "No execution profile connected yet. Use /connect first.",
+            reply_markup=build_main_menu_keyboard(),
+        )
+        return
+
+    await _reply(update, format_execution_profile(status), reply_markup=build_main_menu_keyboard())
+
+
+async def autotrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /autotrade on|off."""
+
+    app_context = _app_context(context)
+    if update.effective_user is None:
+        return
+    if not context.args:
+        await _reply(update, "Usage: /autotrade on|off")
+        return
+
+    enabled = context.args[0].strip().lower()
+    if enabled not in {"on", "off"}:
+        await _reply(update, "Usage: /autotrade on|off")
+        return
+
+    try:
+        status = await app_context.execution_profile_service.set_autotrade(
+            update.effective_user.id,
+            enabled == "on",
+        )
+    except RuntimeError as exc:
+        await _reply(update, str(exc))
+        return
+
+    await _reply(update, format_execution_profile(status), reply_markup=build_main_menu_keyboard())
+
+
+async def amount_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /amount <value>."""
+
+    app_context = _app_context(context)
+    if update.effective_user is None:
+        return
+    if not context.args:
+        await _reply(update, "Usage: /amount 1")
+        return
+
+    try:
+        amount = int(context.args[0])
+        status = await app_context.execution_profile_service.set_trade_amount(
+            update.effective_user.id,
+            amount,
+        )
+    except (RuntimeError, ValueError) as exc:
+        await _reply(update, str(exc))
+        return
+
+    await _reply(update, format_execution_profile(status), reply_markup=build_main_menu_keyboard())
+
+
+async def expiry_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /expiry <label>."""
+
+    app_context = _app_context(context)
+    if update.effective_user is None:
+        return
+    if not context.args:
+        await _reply(update, "Usage: /expiry M5")
+        return
+
+    try:
+        status = await app_context.execution_profile_service.set_expiration_label(
+            update.effective_user.id,
+            context.args[0],
+        )
+    except (RuntimeError, ValueError) as exc:
+        await _reply(update, str(exc))
+        return
+
+    await _reply(update, format_execution_profile(status), reply_markup=build_main_menu_keyboard())
+
+
+async def horizon_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /horizon <5s|10s|30s|1m>."""
+
+    app_context = _app_context(context)
+    if update.effective_user is None:
+        return
+    if not context.args:
+        await _reply(update, "Usage: /horizon 1m")
+        return
+
+    try:
+        status = await app_context.execution_profile_service.set_signal_horizon(
+            update.effective_user.id,
+            context.args[0],
+        )
+    except (RuntimeError, ValueError) as exc:
+        await _reply(update, str(exc))
+        return
+
+    await _reply(update, format_execution_profile(status), reply_markup=build_main_menu_keyboard())
+
+
 async def redeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /redeem <token>."""
 
@@ -508,6 +660,78 @@ async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await _reply(update, format_positions(positions), reply_markup=build_main_menu_keyboard())
 
 
+async def execsignal_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /execsignal <pair> [horizon] [amount]."""
+
+    app_context = _app_context(context)
+    if update.effective_user is None:
+        return
+    profile = await app_context.execution_profile_service.get_profile_status(update.effective_user.id)
+    if not _is_admin(update, app_context) and profile is None:
+        await _reply(update, "No execution profile connected yet. Use /connect first.")
+        return
+    if not context.args:
+        await _reply(update, "Usage: /execsignal EURUSD [1m] [1]")
+        return
+
+    pair_arg = context.args[0]
+    horizon = context.args[1] if len(context.args) >= 2 else "1m"
+    if horizon not in {"5s", "10s", "30s", "1m"}:
+        await _reply(update, "Horizon must be one of: 5s, 10s, 30s, 1m.")
+        return
+
+    try:
+        amount = int(context.args[2]) if len(context.args) >= 3 else (
+            profile.trade_amount if profile is not None else app_context.settings.pocket_option_trade_amount
+        )
+    except ValueError:
+        await _reply(update, "Amount must be an integer.")
+        return
+
+    try:
+        signal = await app_context.signal_service.get_signal(pair_arg)
+    except Exception as exc:
+        logger.exception("Signal execution command failed while generating signal")
+        await _reply(update, str(exc))
+        return
+
+    selected = signal.signals[horizon]
+    if selected.signal == SignalLabel.HOLD:
+        await _reply(
+            update,
+            f"No trade opened. Current {horizon} signal for {signal.display_pair} is HOLD.",
+            reply_markup=build_main_menu_keyboard(),
+        )
+        return
+
+    side = OrderSide.BUY if selected.signal == SignalLabel.BUY else OrderSide.SELL
+    try:
+        response = await app_context.trading_service.place_market_order(
+            MarketOrderRequest(
+                pair=signal.pair,
+                side=side,
+                units=amount,
+                request_source="telegram_execsignal",
+                requested_by=str(update.effective_user.id),
+            )
+        )
+    except Exception as exc:
+        logger.exception("Signal execution command failed while placing order")
+        await _reply(update, str(exc))
+        return
+
+    await _reply(
+        update,
+        "\n".join(
+            [
+                f"Signal selected: {signal.display_pair} {horizon} {selected.signal.value} ({selected.confidence:.2f})",
+                format_market_order_response(response),
+            ]
+        ),
+        reply_markup=build_main_menu_keyboard(),
+    )
+
+
 async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /buy <pair> <units>."""
 
@@ -680,6 +904,7 @@ async def watch_job_callback(context: ContextTypes.DEFAULT_TYPE) -> None:
                 app_context.settings.broker_style,
             ),
         )
+        await _maybe_execute_autotrade(context, app_context, chat_id, user_id, signal)
     except (AccessDeniedError, QuotaExceededError) as exc:
         logger.info("Stopping watch for chat=%s pair=%s: %s", chat_id, pair, exc)
         context.job.schedule_removal()
@@ -908,6 +1133,53 @@ async def _reply(update: Update, text: str, reply_markup=None) -> None:
 
     if update.effective_message is not None:
         await update.effective_message.reply_text(text, reply_markup=reply_markup)
+
+
+async def _maybe_execute_autotrade(
+    context: ContextTypes.DEFAULT_TYPE,
+    app_context: AppContext,
+    chat_id: int,
+    user_id: int,
+    signal,
+) -> None:
+    """Submit a stored-session trade when autotrade is enabled for the watching user."""
+
+    profile = await app_context.execution_profile_service.get_profile_status(user_id)
+    if profile is None or not profile.autotrade_enabled:
+        return
+
+    selected = signal.signals[profile.signal_horizon]
+    if selected.signal == SignalLabel.HOLD:
+        return
+
+    side = OrderSide.BUY if selected.signal == SignalLabel.BUY else OrderSide.SELL
+    try:
+        response = await app_context.trading_service.place_market_order(
+            MarketOrderRequest(
+                pair=signal.pair,
+                side=side,
+                units=profile.trade_amount,
+                request_source="telegram_watch_autotrade",
+                requested_by=str(user_id),
+            )
+        )
+    except Exception:
+        logger.exception("Autotrade failed for user=%s pair=%s", user_id, signal.pair)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"Autotrade failed for {signal.display_pair}.",
+        )
+        return
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text="\n".join(
+            [
+                f"Autotrade executed from {profile.signal_horizon} signal {selected.signal.value} ({selected.confidence:.2f})",
+                format_market_order_response(response),
+            ]
+        ),
+    )
 
 
 async def _place_market_order(

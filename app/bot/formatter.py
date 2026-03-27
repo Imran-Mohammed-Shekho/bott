@@ -4,6 +4,7 @@ from typing import Iterable, List
 from zoneinfo import ZoneInfo
 
 from app.models.access import AccessTokenRecord, UserQuotaStatus
+from app.models.execution import ExecutionProfileStatus
 from app.models.signal import SignalLabel, SignalResponse, SubscriptionRecord
 from app.models.trading import (
     AccountSummary,
@@ -116,6 +117,12 @@ def format_help_message(default_interval_seconds: int) -> str:
             f"/watch EURUSD [{default_interval_seconds}] - چاودێریی دووبارە",
             "/stopwatch EURUSD - وەستاندنی نوێکردنەوەی جووتێک",
             "/status - پیشاندانی چاودێرییە چالاکەکان",
+            "/connect - secure link for your execution session",
+            "/profile - execution profile status",
+            "/autotrade on|off - enable or disable auto execution",
+            "/amount 1 - set trade amount",
+            "/expiry M5 - set broker expiration label",
+            "/horizon 1m - set signal horizon for auto execution",
             "/redeem TOKEN - چالاککردنی چوونەژوورەوەی بۆت",
             "/quota - پیشاندانی سنووری داواکاریی ئەمڕۆ",
         ]
@@ -263,6 +270,21 @@ def format_user_quota_statuses(statuses: List[UserQuotaStatus]) -> str:
             f"- {status.user_id}{username} | {state} | {status.used_today}/{status.daily_limit} used | {status.remaining_today} left"
         )
     return "\n".join(lines)
+
+
+def format_execution_profile(status: ExecutionProfileStatus) -> str:
+    """Render a connected execution profile."""
+
+    return "\n".join(
+        [
+            f"🔗 Provider: {status.provider}",
+            f"Session connected: {'yes' if status.has_session else 'no'}",
+            f"Autotrade: {'on' if status.autotrade_enabled else 'off'}",
+            f"Trade amount: {status.trade_amount}",
+            f"Expiration: {status.expiration_label}",
+            f"Signal horizon: {status.signal_horizon}",
+        ]
+    )
 
 
 def _format_signal_label(label: SignalLabel) -> str:
