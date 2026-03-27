@@ -3,11 +3,17 @@
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse
 
 from app.bootstrap import AppContext
-from app.models.execution import ConnectExecutionRequest, ExecutionProfileStatus
+from app.models.execution import (
+    ConnectExecutionRequest,
+    ExecutionProfileStatus,
+    RemoteBrowserClickRequest,
+    RemoteBrowserKeyRequest,
+    RemoteBrowserTypeRequest,
+)
 from app.models.signal import (
     HealthResponse,
     PairsResponse,
@@ -267,17 +273,36 @@ async def connect_page(token: str, request: Request) -> HTMLResponse:
     <title>Connect Pocket Option Session</title>
     <style>
       body {{ font-family: sans-serif; max-width: 760px; margin: 40px auto; padding: 0 16px; }}
-      textarea, input, select {{ width: 100%; margin-top: 8px; margin-bottom: 16px; }}
-      textarea {{ min-height: 260px; }}
+      input, select {{ width: 100%; margin-top: 8px; margin-bottom: 16px; }}
+      .screen-wrap {{ border: 1px solid #ccc; border-radius: 12px; overflow: hidden; background: #111; }}
+      #screen {{ width: 100%; display: block; touch-action: manipulation; }}
+      .row {{ display: flex; gap: 12px; }}
+      .row > * {{ flex: 1; }}
       button {{ padding: 12px 18px; cursor: pointer; }}
       .status {{ margin-top: 16px; white-space: pre-wrap; }}
     </style>
   </head>
   <body>
     <h1>Connect Pocket Option Session</h1>
-    <p>Paste a valid Playwright storage state JSON for your Pocket Option session.</p>
-    <label>Storage state JSON</label>
-    <textarea id="storage_state" placeholder='{{"cookies":[],"origins":[]}}'></textarea>
+    <p>Use the live remote browser below to log in. When you reach the trading screen, press Save Session.</p>
+    <div class="screen-wrap">
+      <img id="screen" alt="Remote browser screen" />
+    </div>
+    <div class="row">
+      <div>
+        <label>Type into focused field</label>
+        <input id="type_text" type="text" />
+      </div>
+      <div style="display:flex;align-items:end;">
+        <button id="type_button">Type Text</button>
+      </div>
+    </div>
+    <div class="row">
+      <button data-key="Tab">Tab</button>
+      <button data-key="Enter">Enter</button>
+      <button data-key="Backspace">Backspace</button>
+      <button id="refresh_button">Refresh Screen</button>
+    </div>
     <label>Trade amount</label>
     <input id="trade_amount" type="number" min="1" value="1" />
     <label>Expiration label</label>
@@ -292,25 +317,72 @@ async def connect_page(token: str, request: Request) -> HTMLResponse:
     <label><input id="autotrade_enabled" type="checkbox" /> Enable autotrade</label>
     <div>
       <button id="submit">Save Session</button>
+      <button id="cancel">Close Session</button>
     </div>
     <div id="status" class="status"></div>
     <script>
-      document.getElementById("submit").addEventListener("click", async () => {{
+      const screen = document.getElementById("screen");
+      const status = document.getElementById("status");
+      async function refreshScreen() {{
+        await fetch("/api/v1/connect/{token}/start", {{ method: "POST" }});
+        screen.src = "/api/v1/connect/{token}/screenshot?ts=" + Date.now();
+      }}
+      screen.addEventListener("click", async (event) => {{
+        const rect = screen.getBoundingClientRect();
         const payload = {{
-          storage_state: document.getElementById("storage_state").value,
-          trade_amount: Number(document.getElementById("trade_amount").value || "1"),
-          expiration_label: document.getElementById("expiration_label").value,
-          signal_horizon: document.getElementById("signal_horizon").value,
-          autotrade_enabled: document.getElementById("autotrade_enabled").checked,
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top,
+          rendered_width: Math.round(rect.width),
+          rendered_height: Math.round(rect.height),
         }};
-        const response = await fetch("/api/v1/connect/{token}", {{
+        await fetch("/api/v1/connect/{token}/click", {{
           method: "POST",
           headers: {{ "Content-Type": "application/json" }},
           body: JSON.stringify(payload),
         }});
-        const text = await response.text();
-        document.getElementById("status").textContent = text;
+        setTimeout(refreshScreen, 400);
       }});
+      document.getElementById("type_button").addEventListener("click", async () => {{
+        const text = document.getElementById("type_text").value;
+        await fetch("/api/v1/connect/{token}/type", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ text }}),
+        }});
+        setTimeout(refreshScreen, 400);
+      }});
+      document.querySelectorAll("[data-key]").forEach((button) => {{
+        button.addEventListener("click", async () => {{
+          await fetch("/api/v1/connect/{token}/key", {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ key: button.dataset.key }}),
+          }});
+          setTimeout(refreshScreen, 400);
+        }});
+      }});
+      document.getElementById("refresh_button").addEventListener("click", refreshScreen);
+      document.getElementById("submit").addEventListener("click", async () => {{
+        const payload = {{
+          trade_amount: Number(document.getElementById("trade_amount").value || "1"),
+          expiration_label: document.getElementById("expiration_label").value,
+          signal_horizon: document.getElementById("signal_horizon").value,
+          autotrade_enabled: document.getElementById("autotrade_enabled").checked,
+          storage_state: "{{}}",
+        }};
+        const response = await fetch("/api/v1/connect/{token}/save", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify(payload),
+        }});
+        status.textContent = await response.text();
+      }});
+      document.getElementById("cancel").addEventListener("click", async () => {{
+        await fetch("/api/v1/connect/{token}/close", {{ method: "POST" }});
+        status.textContent = "Remote session closed.";
+      }});
+      refreshScreen();
+      setInterval(refreshScreen, 2500);
     </script>
   </body>
 </html>
@@ -338,3 +410,111 @@ async def connect_session(
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/connect/{token}/start", include_in_schema=False)
+async def start_remote_connect(token: str, request: Request) -> dict:
+    """Launch or reuse the hosted remote browser for this connect token."""
+
+    app_context = get_app_context(request)
+    try:
+        await app_context.remote_browser_connect_service.ensure_session(token)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "ready"}
+
+
+@router.get("/connect/{token}/screenshot", include_in_schema=False)
+async def remote_connect_screenshot(token: str, request: Request) -> Response:
+    """Return the current browser screenshot for the connect session."""
+
+    app_context = get_app_context(request)
+    try:
+        screenshot = await app_context.remote_browser_connect_service.get_screenshot(token)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(content=screenshot, media_type="image/png")
+
+
+@router.post("/connect/{token}/click", include_in_schema=False)
+async def remote_connect_click(
+    token: str,
+    payload: RemoteBrowserClickRequest,
+    request: Request,
+) -> dict:
+    """Send a tap/click into the hosted remote browser."""
+
+    app_context = get_app_context(request)
+    try:
+        await app_context.remote_browser_connect_service.click(
+            token=token,
+            x=payload.x,
+            y=payload.y,
+            rendered_width=payload.rendered_width,
+            rendered_height=payload.rendered_height,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "clicked"}
+
+
+@router.post("/connect/{token}/type", include_in_schema=False)
+async def remote_connect_type(
+    token: str,
+    payload: RemoteBrowserTypeRequest,
+    request: Request,
+) -> dict:
+    """Type text into the focused field of the hosted remote browser."""
+
+    app_context = get_app_context(request)
+    try:
+        await app_context.remote_browser_connect_service.type_text(token, payload.text)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "typed"}
+
+
+@router.post("/connect/{token}/key", include_in_schema=False)
+async def remote_connect_key(
+    token: str,
+    payload: RemoteBrowserKeyRequest,
+    request: Request,
+) -> dict:
+    """Press a keyboard key in the hosted remote browser."""
+
+    app_context = get_app_context(request)
+    try:
+        await app_context.remote_browser_connect_service.press_key(token, payload.key)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "pressed"}
+
+
+@router.post("/connect/{token}/save", response_model=ExecutionProfileStatus, include_in_schema=False)
+async def remote_connect_save(
+    token: str,
+    payload: ConnectExecutionRequest,
+    request: Request,
+) -> ExecutionProfileStatus:
+    """Capture the hosted browser storage state and store it encrypted."""
+
+    app_context = get_app_context(request)
+    try:
+        return await app_context.remote_browser_connect_service.save_session(
+            token=token,
+            autotrade_enabled=payload.autotrade_enabled,
+            trade_amount=payload.trade_amount,
+            expiration_label=payload.expiration_label,
+            signal_horizon=payload.signal_horizon,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/connect/{token}/close", include_in_schema=False)
+async def remote_connect_close(token: str, request: Request) -> dict:
+    """Close and discard the hosted remote browser session."""
+
+    app_context = get_app_context(request)
+    await app_context.remote_browser_connect_service.close_session(token)
+    return {"status": "closed"}

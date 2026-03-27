@@ -452,6 +452,20 @@ class SupabasePersistence:
             return None
         return self._user_execution_profile_from_row(row)
 
+    async def delete_user_execution_profile(self, user_id: int) -> bool:
+        """Delete a user's stored execution profile."""
+
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            result = await connection.execute(
+                """
+                delete from user_execution_profiles
+                where user_id = $1
+                """,
+                user_id,
+            )
+        return result.endswith("1")
+
     async def remove_subscription(self, chat_id: int, pair: str) -> bool:
         """Delete a subscription."""
 

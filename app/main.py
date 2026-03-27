@@ -39,6 +39,7 @@ def create_app() -> FastAPI:
         )
         yield
         await stop_telegram_application(app.state.telegram_application)
+        await app_context.remote_browser_connect_service.close_all()
         if app_context.persistence is not None:
             await app_context.persistence.close()
 

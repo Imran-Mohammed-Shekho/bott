@@ -19,6 +19,7 @@ from app.services.prediction_service import RuleBasedPredictionProvider, Sklearn
 from app.services.signal_service import SignalService
 from app.services.subscriptions import SubscriptionService
 from app.services.trading_service import TradingService
+from app.services.remote_browser_connect import RemoteBrowserConnectService
 from app.utils.logging import configure_logging
 from app.utils.monitoring import configure_monitoring
 
@@ -36,6 +37,7 @@ class AppContext:
     trading_service: TradingService
     access_control_service: AccessControlService
     execution_profile_service: ExecutionProfileService
+    remote_browser_connect_service: RemoteBrowserConnectService
     persistence: Optional[SupabasePersistence]
 
 
@@ -54,6 +56,10 @@ def build_app_context() -> AppContext:
     subscription_service = SubscriptionService(persistence=persistence)
     access_control_service = AccessControlService(settings=settings, persistence=persistence)
     execution_profile_service = ExecutionProfileService(settings=settings, persistence=persistence)
+    remote_browser_connect_service = RemoteBrowserConnectService(
+        settings=settings,
+        execution_profile_service=execution_profile_service,
+    )
     signal_service = SignalService(
         settings=settings,
         market_data_service=market_data_service,
@@ -78,6 +84,7 @@ def build_app_context() -> AppContext:
         trading_service=trading_service,
         access_control_service=access_control_service,
         execution_profile_service=execution_profile_service,
+        remote_browser_connect_service=remote_browser_connect_service,
         persistence=persistence,
     )
 

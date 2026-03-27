@@ -50,3 +50,30 @@ def test_build_connect_url_uses_api_prefix() -> None:
     )
 
     assert service.build_connect_url("abc123") == "https://example.com/api/v1/connect/abc123"
+
+
+def test_direct_session_save_and_disconnect() -> None:
+    """Telegram-captured session JSON should save and later disconnect cleanly."""
+
+    service = ExecutionProfileService(
+        Settings(
+            display_timezone="UTC",
+            public_app_url="https://example.com",
+            session_encryption_key=FERNET_TEST_KEY,
+        )
+    )
+
+    async def run() -> None:
+        status = await service.save_session_json(
+            user_id=999,
+            storage_state_json='{"cookies":[{"name":"sid","value":"xyz"}],"origins":[]}',
+        )
+        payload = await service.decrypt_session(999)
+        removed = await service.disconnect_profile(999)
+
+        assert status.has_session is True
+        assert payload["cookies"][0]["value"] == "xyz"
+        assert removed is True
+        assert await service.get_profile_status(999) is None
+
+    asyncio.run(run())

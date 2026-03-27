@@ -70,3 +70,24 @@ class ConnectExecutionRequest(BaseModel):
         if normalized not in VALID_SIGNAL_HORIZONS:
             raise ValueError("Signal horizon must be one of 5s, 10s, 30s, 1m.")
         return normalized
+
+
+class RemoteBrowserClickRequest(BaseModel):
+    """Tap or click request from the hosted remote-browser page."""
+
+    x: float
+    y: float
+    rendered_width: int = Field(gt=0)
+    rendered_height: int = Field(gt=0)
+
+
+class RemoteBrowserTypeRequest(BaseModel):
+    """Keyboard text injection for the currently focused field."""
+
+    text: str
+
+
+class RemoteBrowserKeyRequest(BaseModel):
+    """Single key press request for the currently focused field."""
+
+    key: str

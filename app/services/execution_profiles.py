@@ -98,6 +98,42 @@ class ExecutionProfileService:
         profile = await self._upsert_profile(profile)
         return self._status_from_profile(profile)
 
+    async def save_session_json(
+        self,
+        user_id: int,
+        storage_state_json: str,
+        autotrade_enabled: Optional[bool] = None,
+        trade_amount: Optional[int] = None,
+        expiration_label: Optional[str] = None,
+        signal_horizon: Optional[str] = None,
+    ) -> ExecutionProfileStatus:
+        """Store a user's session JSON directly without a connect token."""
+
+        try:
+            storage_state = json.loads(storage_state_json)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Storage state must be valid JSON.") from exc
+
+        now = datetime.now(self._timezone)
+        existing = await self.get_profile(user_id)
+        profile = UserExecutionProfile(
+            user_id=user_id,
+            provider="pocket_option_browser",
+            encrypted_session=self._get_cipher().encrypt_json(storage_state),
+            autotrade_enabled=(
+                existing.autotrade_enabled if existing and autotrade_enabled is None else bool(autotrade_enabled)
+            ),
+            trade_amount=trade_amount or (existing.trade_amount if existing else self._settings.pocket_option_trade_amount),
+            expiration_label=expiration_label or (
+                existing.expiration_label if existing else self._settings.pocket_option_expiration_label
+            ),
+            signal_horizon=signal_horizon or (existing.signal_horizon if existing else "1m"),
+            created_at=existing.created_at if existing else now,
+            updated_at=now,
+        )
+        profile = await self._upsert_profile(profile)
+        return self._status_from_profile(profile)
+
     async def get_profile(self, user_id: int) -> Optional[UserExecutionProfile]:
         """Return the raw stored execution profile for a user."""
 
@@ -152,6 +188,14 @@ class ExecutionProfileService:
         return self._status_from_profile(
             await self._update_profile(user_id, signal_horizon=horizon.strip().lower())
         )
+
+    async def disconnect_profile(self, user_id: int) -> bool:
+        """Delete a user's stored execution profile."""
+
+        if self._persistence is not None:
+            return await self._persistence.delete_user_execution_profile(user_id)
+        async with self._get_lock():
+            return self._profiles.pop(user_id, None) is not None
 
     async def _consume_connect_token(
         self,

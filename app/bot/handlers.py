@@ -1,5 +1,6 @@
 """Telegram command handlers and scheduled alert jobs."""
 
+import json
 import logging
 from typing import Optional
 
@@ -66,6 +67,10 @@ def build_telegram_application(app_context: AppContext) -> Application:
     application.add_handler(CommandHandler("stopwatch", stopwatch_command))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("connect", connect_command))
+    application.add_handler(CommandHandler("connectsession", connectsession_command))
+    application.add_handler(CommandHandler("savesession", savesession_command))
+    application.add_handler(CommandHandler("cancelsession", cancelsession_command))
+    application.add_handler(CommandHandler("disconnectsession", disconnectsession_command))
     application.add_handler(CommandHandler("profile", profile_command))
     application.add_handler(CommandHandler("autotrade", autotrade_command))
     application.add_handler(CommandHandler("amount", amount_command))
@@ -355,6 +360,84 @@ async def connect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         ),
         reply_markup=build_main_menu_keyboard(),
     )
+
+
+async def connectsession_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /connectsession and enable JSON capture mode in chat."""
+
+    if update.effective_user is None:
+        return
+
+    context.user_data["session_capture"] = {
+        "chunks": [],
+        "started_by": update.effective_user.id,
+    }
+    await _reply(
+        update,
+        "\n".join(
+            [
+                "Session capture mode is on.",
+                "Paste your full Pocket Option storageState JSON in one or more messages.",
+                "When you finish, send /savesession",
+                "To abort, send /cancelsession",
+            ]
+        ),
+        reply_markup=build_main_menu_keyboard(),
+    )
+
+
+async def savesession_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /savesession and encrypt the pasted session JSON."""
+
+    app_context = _app_context(context)
+    if update.effective_user is None:
+        return
+
+    capture_state = context.user_data.get("session_capture")
+    if not capture_state or not capture_state.get("chunks"):
+        await _reply(update, "No session JSON captured yet. Use /connectsession first.")
+        return
+
+    payload = "\n".join(capture_state["chunks"])
+    try:
+        json.loads(payload)
+        status = await app_context.execution_profile_service.save_session_json(
+            user_id=update.effective_user.id,
+            storage_state_json=payload,
+        )
+    except Exception as exc:
+        await _reply(update, f"Session save failed: {exc}")
+        return
+
+    context.user_data.pop("session_capture", None)
+    await _reply(
+        update,
+        "Session stored securely.\n\n" + format_execution_profile(status),
+        reply_markup=build_main_menu_keyboard(),
+    )
+
+
+async def cancelsession_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /cancelsession."""
+
+    context.user_data.pop("session_capture", None)
+    await _reply(update, "Session capture cancelled.", reply_markup=build_main_menu_keyboard())
+
+
+async def disconnectsession_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /disconnectsession."""
+
+    app_context = _app_context(context)
+    if update.effective_user is None:
+        return
+
+    removed = await app_context.execution_profile_service.disconnect_profile(update.effective_user.id)
+    context.user_data.pop("session_capture", None)
+    if not removed:
+        await _reply(update, "No stored execution session found.", reply_markup=build_main_menu_keyboard())
+        return
+
+    await _reply(update, "Stored execution session removed.", reply_markup=build_main_menu_keyboard())
 
 
 async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -792,6 +875,17 @@ async def menu_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     app_context = _app_context(context)
     text = (update.effective_message.text or "").strip()
+    capture_state = context.user_data.get("session_capture")
+
+    if capture_state is not None:
+        chunks = capture_state.setdefault("chunks", [])
+        chunks.append(text)
+        await _reply(
+            update,
+            f"Captured session chunk {len(chunks)}. Send more JSON or use /savesession.",
+            reply_markup=build_main_menu_keyboard(),
+        )
+        return
 
     if text == MAIN_MENU_SIGNAL:
         await _reply(
