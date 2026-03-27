@@ -17,6 +17,47 @@ This project can route live trade execution through a Playwright-controlled Pock
 
 Log in manually in the opened Chromium window, then return to the terminal and press Enter. The session is stored at `POCKET_OPTION_STORAGE_STATE_PATH`.
 
+## 2B. User-friendly secure connect flow
+
+For per-user sessions, the user does not need to paste raw JSON manually if they can run a helper locally.
+
+1. In Telegram, the user runs:
+
+```text
+/connect
+```
+
+2. The bot replies with a one-time secure link like:
+
+```text
+https://your-app.onrender.com/api/v1/connect/...
+```
+
+3. The user runs:
+
+```bash
+.venv/bin/python scripts/connect_pocket_option_session.py "SECURE_CONNECT_URL"
+```
+
+Optional flags:
+
+```bash
+.venv/bin/python scripts/connect_pocket_option_session.py "SECURE_CONNECT_URL" \
+  --trade-amount 1 \
+  --expiry M5 \
+  --horizon 1m \
+  --autotrade
+```
+
+What happens:
+- Chromium opens
+- the user logs into Pocket Option
+- the script captures Playwright storage state
+- the script uploads it directly to the secure connect endpoint
+- the backend encrypts and stores it in Supabase
+
+The user never needs to manually copy JSON in this flow.
+
 ## 3. Configure execution
 
 Set:

@@ -347,8 +347,9 @@ async def connect_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         update,
         "\n".join(
             [
-                "Open this secure link and paste your Pocket Option Playwright storage state JSON:",
+                "Open this secure link to connect your Pocket Option session:",
                 f"{connect_url}",
+                "If you want the easy flow, run scripts/connect_pocket_option_session.py with this URL.",
                 f"Link expires in {app_context.settings.connect_token_ttl_minutes} minutes.",
             ]
         ),
