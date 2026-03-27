@@ -66,28 +66,28 @@ def build_telegram_application(app_context: AppContext) -> Application:
     application.add_handler(CommandHandler("watch", watch_command))
     application.add_handler(CommandHandler("stopwatch", stopwatch_command))
     application.add_handler(CommandHandler("status", status_command))
-    application.add_handler(CommandHandler("connect", connect_command))
-    application.add_handler(CommandHandler("connectsession", connectsession_command))
-    application.add_handler(CommandHandler("savesession", savesession_command))
-    application.add_handler(CommandHandler("cancelsession", cancelsession_command))
-    application.add_handler(CommandHandler("disconnectsession", disconnectsession_command))
-    application.add_handler(CommandHandler("profile", profile_command))
-    application.add_handler(CommandHandler("autotrade", autotrade_command))
-    application.add_handler(CommandHandler("amount", amount_command))
-    application.add_handler(CommandHandler("expiry", expiry_command))
-    application.add_handler(CommandHandler("horizon", horizon_command))
     application.add_handler(CommandHandler("redeem", redeem_command))
     application.add_handler(CommandHandler("quota", quota_command))
     application.add_handler(CommandHandler("grant", grant_command))
     application.add_handler(CommandHandler("setquota", setquota_command))
     application.add_handler(CommandHandler("users", users_command))
     application.add_handler(CommandHandler("disableuser", disableuser_command))
-    application.add_handler(CommandHandler("account", account_command))
-    application.add_handler(CommandHandler("positions", positions_command))
-    application.add_handler(CommandHandler("execsignal", execsignal_command))
-    application.add_handler(CommandHandler("buy", buy_command))
-    application.add_handler(CommandHandler("sell", sell_command))
-    application.add_handler(CommandHandler("close", close_position_command))
+    application.add_handler(CommandHandler("connect", execution_disabled_command))
+    application.add_handler(CommandHandler("connectsession", execution_disabled_command))
+    application.add_handler(CommandHandler("savesession", execution_disabled_command))
+    application.add_handler(CommandHandler("cancelsession", execution_disabled_command))
+    application.add_handler(CommandHandler("disconnectsession", execution_disabled_command))
+    application.add_handler(CommandHandler("profile", execution_disabled_command))
+    application.add_handler(CommandHandler("autotrade", execution_disabled_command))
+    application.add_handler(CommandHandler("amount", execution_disabled_command))
+    application.add_handler(CommandHandler("expiry", execution_disabled_command))
+    application.add_handler(CommandHandler("horizon", execution_disabled_command))
+    application.add_handler(CommandHandler("account", execution_disabled_command))
+    application.add_handler(CommandHandler("positions", execution_disabled_command))
+    application.add_handler(CommandHandler("execsignal", execution_disabled_command))
+    application.add_handler(CommandHandler("buy", execution_disabled_command))
+    application.add_handler(CommandHandler("sell", execution_disabled_command))
+    application.add_handler(CommandHandler("close", execution_disabled_command))
     application.add_handler(CallbackQueryHandler(callback_query_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_message_handler))
     application.add_error_handler(error_handler)
@@ -120,14 +120,19 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "\n/setquota 123456789 20 - set direct daily quota"
             "\n/users - list managed users"
             "\n/disableuser 123456789 - disable bot access"
-            "\n/account - account summary"
-            "\n/positions - open positions"
-            "\n/execsignal EURUSD [1m] [1] - trade current signal"
-            "\n/buy EURUSD 100"
-            "\n/sell EURUSD 100"
-            "\n/close EURUSD [all|long|short]"
         )
     await _reply(update, message, reply_markup=build_main_menu_keyboard())
+
+
+async def execution_disabled_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Reply for retired execution commands while the bot runs in signals-only mode."""
+
+    await _reply(
+        update,
+        "Trading and autotrading are disabled right now.\n"
+        "This bot is currently running in signals-only mode with admin access control.",
+        reply_markup=build_main_menu_keyboard(),
+    )
 
 
 async def pairs_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -999,7 +1004,6 @@ async def watch_job_callback(context: ContextTypes.DEFAULT_TYPE) -> None:
                 app_context.settings.broker_style,
             ),
         )
-        await _maybe_execute_autotrade(context, app_context, chat_id, user_id, signal)
     except (AccessDeniedError, QuotaExceededError) as exc:
         logger.info("Stopping watch for chat=%s pair=%s: %s", chat_id, pair, exc)
         context.job.schedule_removal()
