@@ -4,7 +4,7 @@ services:
     runtime: python
     plan: starter
     region: frankfurt
-    buildCommand: pip install -r requirements.txt && python -m playwright install chromium
+    buildCommand: pip install -r requirements.txt && PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/.playwright-browsers python -m playwright install chromium
     startCommand: gunicorn app.main:app --bind 0.0.0.0:$PORT --workers 1 --worker-class uvicorn.workers.UvicornWorker --timeout 180
     healthCheckPath: /api/v1/health
     autoDeployTrigger: commit
@@ -15,6 +15,8 @@ services:
         value: production
       - key: PUBLIC_APP_URL
         sync: false
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /opt/render/project/src/.playwright-browsers
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_WEBHOOK_URL

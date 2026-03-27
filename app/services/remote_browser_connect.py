@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, Optional
@@ -66,7 +67,20 @@ class RemoteBrowserConnectService:
 
             viewport = {"width": 430, "height": 932}
             playwright = await async_playwright().start()
-            browser = await playwright.chromium.launch(headless=self._settings.pocket_option_headless)
+            try:
+                browser = await playwright.chromium.launch(
+                    headless=self._settings.pocket_option_headless
+                )
+            except Exception as exc:
+                await playwright.stop()
+                browsers_path = os.getenv("PLAYWRIGHT_BROWSERS_PATH")
+                hint = (
+                    "Playwright Chromium is not installed on the server. "
+                    "Redeploy after running the Render build step that installs Chromium."
+                )
+                if browsers_path:
+                    hint += f" Expected browser path root: {browsers_path}."
+                raise RuntimeError(hint) from exc
             context = await browser.new_context(viewport=viewport)
             page = await context.new_page()
             try:
