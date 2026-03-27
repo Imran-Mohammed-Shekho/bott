@@ -91,3 +91,9 @@ class RemoteBrowserKeyRequest(BaseModel):
     """Single key press request for the currently focused field."""
 
     key: str
+
+
+class RemoteBrowserScrollRequest(BaseModel):
+    """Mouse-wheel style scroll request for the hosted browser."""
+
+    delta_y: int

@@ -12,6 +12,7 @@ from app.models.execution import (
     ExecutionProfileStatus,
     RemoteBrowserClickRequest,
     RemoteBrowserKeyRequest,
+    RemoteBrowserScrollRequest,
     RemoteBrowserTypeRequest,
 )
 from app.models.signal import (
@@ -272,41 +273,85 @@ async def connect_page(token: str, request: Request) -> HTMLResponse:
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Connect Pocket Option Session</title>
     <style>
-      body {{ font-family: sans-serif; max-width: 760px; margin: 40px auto; padding: 0 16px; }}
-      input, select {{ width: 100%; margin-top: 8px; margin-bottom: 16px; }}
+      body {{ font-family: sans-serif; max-width: 760px; margin: 24px auto; padding: 0 16px; line-height: 1.45; }}
+      h1, h2 {{ margin-bottom: 8px; }}
+      p, li {{ color: #333; }}
+      input, select {{ width: 100%; margin-top: 8px; margin-bottom: 16px; font-size: 16px; padding: 12px; box-sizing: border-box; }}
       .screen-wrap {{ border: 1px solid #ccc; border-radius: 12px; overflow: hidden; background: #111; }}
       #screen {{ width: 100%; display: block; touch-action: manipulation; }}
       .row {{ display: flex; gap: 12px; }}
       .row > * {{ flex: 1; }}
-      button {{ padding: 12px 18px; cursor: pointer; }}
-      .status {{ margin-top: 16px; white-space: pre-wrap; }}
+      button {{ padding: 12px 18px; cursor: pointer; font-size: 16px; }}
+      .status {{ margin-top: 16px; white-space: pre-wrap; padding: 12px; border-radius: 8px; background: #f4f4f4; }}
+      .hint {{ font-size: 14px; color: #666; margin-top: -8px; margin-bottom: 16px; }}
+      .steps {{ background: #f9f9ff; border: 1px solid #dfe4ff; border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; }}
+      .screen-box {{ position: relative; }}
+      .tap-marker {{
+        position: absolute;
+        width: 22px;
+        height: 22px;
+        border-radius: 999px;
+        background: rgba(255, 64, 64, 0.85);
+        border: 2px solid white;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+        display: none;
+      }}
+      .toolbar {{ margin: 12px 0; display: flex; gap: 8px; flex-wrap: wrap; }}
     </style>
   </head>
   <body>
     <h1>Connect Pocket Option Session</h1>
-    <p>Use the live remote browser below to log in. When you reach the trading screen, press Save Session.</p>
-    <div class="screen-wrap">
+    <div class="steps">
+      <h2>How To Use This Page</h2>
+      <ol>
+        <li>Tap the exact field or button you want inside the remote browser image.</li>
+        <li>Use the text boxes below to type into the selected field.</li>
+        <li>Use Tab / Enter / Backspace if the site needs keyboard navigation.</li>
+        <li>Use Scroll Down if the login button is lower on the page.</li>
+        <li>When Pocket Option is fully logged in and the trading page is visible, press Save Session.</li>
+      </ol>
+    </div>
+    <p><strong>Current target:</strong> <span id="target_label">No field selected yet</span></p>
+    <p><strong>Last tap:</strong> <span id="tap_label">none</span></p>
+    <div class="screen-wrap screen-box">
       <img id="screen" alt="Remote browser screen" />
+      <div id="tap_marker" class="tap-marker"></div>
     </div>
-    <div class="row">
-      <div>
-        <label>Type into focused field</label>
-        <input id="type_text" type="text" />
-      </div>
-      <div style="display:flex;align-items:end;">
-        <button id="type_button">Type Text</button>
-      </div>
-    </div>
-    <div class="row">
+    <div class="toolbar">
+      <button id="refresh_button">Refresh Screen</button>
+      <button id="scroll_down">Scroll Down</button>
+      <button id="scroll_up">Scroll Up</button>
       <button data-key="Tab">Tab</button>
       <button data-key="Enter">Enter</button>
       <button data-key="Backspace">Backspace</button>
-      <button id="refresh_button">Refresh Screen</button>
+    </div>
+    <div class="row">
+      <div>
+        <label>Email / Username / Generic Text</label>
+        <input id="type_text" type="text" placeholder="Type normal text here" />
+        <div class="hint">Tap a field in the screenshot first, then type here, then press Send Text.</div>
+      </div>
+      <div style="display:flex;align-items:end;">
+        <button id="type_button">Send Text</button>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Password</label>
+        <input id="password_text" type="password" placeholder="Type password here" />
+        <div class="hint">Tap the password field in the screenshot first, then press Send Password.</div>
+      </div>
+      <div style="display:flex;align-items:end;">
+        <button id="password_button">Send Password</button>
+      </div>
     </div>
     <label>Trade amount</label>
     <input id="trade_amount" type="number" min="1" value="1" />
+    <div class="hint">This is the amount the bot will use later when executing orders for this user.</div>
     <label>Expiration label</label>
     <input id="expiration_label" type="text" value="M5" />
+    <div class="hint">Example: M1, M5, M15. It should match Pocket Option labels.</div>
     <label>Signal horizon</label>
     <select id="signal_horizon">
       <option value="5s">5s</option>
@@ -314,7 +359,8 @@ async def connect_page(token: str, request: Request) -> HTMLResponse:
       <option value="30s">30s</option>
       <option value="1m" selected>1m</option>
     </select>
-    <label><input id="autotrade_enabled" type="checkbox" /> Enable autotrade</label>
+    <div class="hint">This tells the bot which signal horizon to use for automatic execution.</div>
+    <label><input id="autotrade_enabled" type="checkbox" /> Enable autotrade after saving this session</label>
     <div>
       <button id="submit">Save Session</button>
       <button id="cancel">Close Session</button>
@@ -323,15 +369,27 @@ async def connect_page(token: str, request: Request) -> HTMLResponse:
     <script>
       const screen = document.getElementById("screen");
       const status = document.getElementById("status");
+      const targetLabel = document.getElementById("target_label");
+      const tapLabel = document.getElementById("tap_label");
+      const tapMarker = document.getElementById("tap_marker");
+      let lastTapX = null;
+      let lastTapY = null;
       async function refreshScreen() {{
         await fetch("/api/v1/connect/{token}/start", {{ method: "POST" }});
         screen.src = "/api/v1/connect/{token}/screenshot?ts=" + Date.now();
       }}
       screen.addEventListener("click", async (event) => {{
         const rect = screen.getBoundingClientRect();
+        lastTapX = event.clientX - rect.left;
+        lastTapY = event.clientY - rect.top;
+        tapLabel.textContent = "x=" + Math.round(lastTapX) + ", y=" + Math.round(lastTapY);
+        targetLabel.textContent = "Focused the area you tapped";
+        tapMarker.style.left = lastTapX + "px";
+        tapMarker.style.top = lastTapY + "px";
+        tapMarker.style.display = "block";
         const payload = {{
-          x: event.clientX - rect.left,
-          y: event.clientY - rect.top,
+          x: lastTapX,
+          y: lastTapY,
           rendered_width: Math.round(rect.width),
           rendered_height: Math.round(rect.height),
         }};
@@ -349,6 +407,17 @@ async def connect_page(token: str, request: Request) -> HTMLResponse:
           headers: {{ "Content-Type": "application/json" }},
           body: JSON.stringify({{ text }}),
         }});
+        targetLabel.textContent = "Sent normal text to the focused field";
+        setTimeout(refreshScreen, 400);
+      }});
+      document.getElementById("password_button").addEventListener("click", async () => {{
+        const text = document.getElementById("password_text").value;
+        await fetch("/api/v1/connect/{token}/type", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ text }}),
+        }});
+        targetLabel.textContent = "Sent password text to the focused field";
         setTimeout(refreshScreen, 400);
       }});
       document.querySelectorAll("[data-key]").forEach((button) => {{
@@ -358,11 +427,31 @@ async def connect_page(token: str, request: Request) -> HTMLResponse:
             headers: {{ "Content-Type": "application/json" }},
             body: JSON.stringify({{ key: button.dataset.key }}),
           }});
+          targetLabel.textContent = "Pressed key: " + button.dataset.key;
           setTimeout(refreshScreen, 400);
         }});
       }});
+      document.getElementById("scroll_down").addEventListener("click", async () => {{
+        await fetch("/api/v1/connect/{token}/scroll", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ delta_y: 600 }}),
+        }});
+        targetLabel.textContent = "Scrolled down";
+        setTimeout(refreshScreen, 400);
+      }});
+      document.getElementById("scroll_up").addEventListener("click", async () => {{
+        await fetch("/api/v1/connect/{token}/scroll", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ delta_y: -600 }}),
+        }});
+        targetLabel.textContent = "Scrolled up";
+        setTimeout(refreshScreen, 400);
+      }});
       document.getElementById("refresh_button").addEventListener("click", refreshScreen);
       document.getElementById("submit").addEventListener("click", async () => {{
+        status.textContent = "Saving encrypted session...";
         const payload = {{
           trade_amount: Number(document.getElementById("trade_amount").value || "1"),
           expiration_label: document.getElementById("expiration_label").value,
@@ -488,6 +577,22 @@ async def remote_connect_key(
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": "pressed"}
+
+
+@router.post("/connect/{token}/scroll", include_in_schema=False)
+async def remote_connect_scroll(
+    token: str,
+    payload: RemoteBrowserScrollRequest,
+    request: Request,
+) -> dict:
+    """Scroll the hosted remote browser."""
+
+    app_context = get_app_context(request)
+    try:
+        await app_context.remote_browser_connect_service.scroll(token, payload.delta_y)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "scrolled"}
 
 
 @router.post("/connect/{token}/save", response_model=ExecutionProfileStatus, include_in_schema=False)

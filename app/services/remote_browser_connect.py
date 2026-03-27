@@ -124,6 +124,13 @@ class RemoteBrowserConnectService:
         await session.page.keyboard.press(key)
         session.last_seen_at = datetime.now().astimezone()
 
+    async def scroll(self, token: str, delta_y: int) -> None:
+        """Scroll the hosted browser vertically."""
+
+        session = await self._require_session(token)
+        await session.page.mouse.wheel(0, delta_y)
+        session.last_seen_at = datetime.now().astimezone()
+
     async def save_session(
         self,
         token: str,
