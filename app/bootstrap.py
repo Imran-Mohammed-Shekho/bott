@@ -11,6 +11,7 @@ from app.features.engineering import FeatureEngineer
 from app.models.interfaces import AbstractPredictionProvider
 from app.models.model_loader import JoblibModelLoader
 from app.persistence.supabase import SupabasePersistence
+from app.services.access_control import AccessControlService
 from app.services.market_data_service import MarketDataService
 from app.services.prediction_service import RuleBasedPredictionProvider, SklearnPredictionProvider
 from app.services.signal_service import SignalService
@@ -31,6 +32,7 @@ class AppContext:
     signal_service: SignalService
     subscription_service: SubscriptionService
     trading_service: TradingService
+    access_control_service: AccessControlService
     persistence: Optional[SupabasePersistence]
 
 
@@ -47,6 +49,7 @@ def build_app_context() -> AppContext:
     prediction_provider = _build_prediction_provider(settings)
     persistence = _build_persistence(settings)
     subscription_service = SubscriptionService(persistence=persistence)
+    access_control_service = AccessControlService(settings=settings, persistence=persistence)
     signal_service = SignalService(
         settings=settings,
         market_data_service=market_data_service,
@@ -69,6 +72,7 @@ def build_app_context() -> AppContext:
         signal_service=signal_service,
         subscription_service=subscription_service,
         trading_service=trading_service,
+        access_control_service=access_control_service,
         persistence=persistence,
     )
 

@@ -15,14 +15,17 @@ from telegram.ext import (
 
 from app.bootstrap import AppContext
 from app.bot.formatter import (
+    format_access_token,
     format_account_summary,
     format_close_position_response,
     format_help_message,
     format_market_order_response,
     format_pairs,
     format_positions,
+    format_quota_status,
     format_signal_message,
     format_status,
+    format_user_quota_statuses,
 )
 from app.bot.keyboards import (
     MAIN_MENU_HELP,
@@ -37,6 +40,7 @@ from app.bot.keyboards import (
     build_watch_interval_keyboard,
     build_watch_pair_keyboard,
 )
+from app.services.access_control import AccessDeniedError, QuotaExceededError
 from app.models.trading import ClosePositionRequest, MarketOrderRequest, OrderSide, PositionCloseSide
 
 logger = logging.getLogger(__name__)
@@ -59,6 +63,12 @@ def build_telegram_application(app_context: AppContext) -> Application:
     application.add_handler(CommandHandler("watch", watch_command))
     application.add_handler(CommandHandler("stopwatch", stopwatch_command))
     application.add_handler(CommandHandler("status", status_command))
+    application.add_handler(CommandHandler("redeem", redeem_command))
+    application.add_handler(CommandHandler("quota", quota_command))
+    application.add_handler(CommandHandler("grant", grant_command))
+    application.add_handler(CommandHandler("setquota", setquota_command))
+    application.add_handler(CommandHandler("users", users_command))
+    application.add_handler(CommandHandler("disableuser", disableuser_command))
     application.add_handler(CommandHandler("account", account_command))
     application.add_handler(CommandHandler("positions", positions_command))
     application.add_handler(CommandHandler("buy", buy_command))
@@ -92,6 +102,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     message = format_help_message(app_context.settings.default_watch_interval_seconds)
     if _is_admin(update, app_context):
         message += (
+            "\n/grant 20 - generate onboarding token"
+            "\n/setquota 123456789 20 - set direct daily quota"
+            "\n/users - list managed users"
+            "\n/disableuser 123456789 - disable bot access"
             "\n/account - account summary"
             "\n/positions - open positions"
             "\n/buy EURUSD 100"
@@ -116,6 +130,8 @@ async def signal_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Handle /signal <pair>."""
 
     app_context = _app_context(context)
+    if update.effective_user is None:
+        return
     pair = _required_pair_arg(context)
     if not pair:
         await _reply(
@@ -126,7 +142,18 @@ async def signal_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     try:
+        await app_context.access_control_service.ensure_can_request(
+            user_id=update.effective_user.id,
+            username=update.effective_user.username,
+        )
         signal = await app_context.signal_service.get_signal(pair)
+        await app_context.access_control_service.consume_request(
+            user_id=update.effective_user.id,
+            username=update.effective_user.username,
+        )
+    except (AccessDeniedError, QuotaExceededError) as exc:
+        await _reply(update, _access_error_message(exc))
+        return
     except ValueError as exc:
         await _reply(update, str(exc))
         return
@@ -185,7 +212,18 @@ async def watch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     try:
         pair = app_context.signal_service.resolve_pair(pair_arg)
+        await app_context.access_control_service.ensure_can_request(
+            user_id=update.effective_user.id,
+            username=update.effective_user.username,
+        )
         signal = await app_context.signal_service.get_signal(pair)
+        await app_context.access_control_service.consume_request(
+            user_id=update.effective_user.id,
+            username=update.effective_user.username,
+        )
+    except (AccessDeniedError, QuotaExceededError) as exc:
+        await _reply(update, _access_error_message(exc))
+        return
     except ValueError as exc:
         await _reply(update, str(exc))
         return
@@ -200,7 +238,13 @@ async def watch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         pair=pair,
         interval_seconds=interval_seconds,
     )
-    _schedule_watch_job(context.application, update.effective_chat.id, pair, interval_seconds)
+    _schedule_watch_job(
+        context.application,
+        update.effective_chat.id,
+        update.effective_user.id,
+        pair,
+        interval_seconds,
+    )
 
     await _reply(
         update,
@@ -271,6 +315,165 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     records = await app_context.subscription_service.list_for_chat(update.effective_chat.id)
     await _reply(update, format_status(records), reply_markup=build_main_menu_keyboard())
+
+
+async def redeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /redeem <token>."""
+
+    app_context = _app_context(context)
+    if update.effective_user is None:
+        return
+    if not context.args:
+        await _reply(update, "Usage: /redeem ACCESS_TOKEN", reply_markup=build_main_menu_keyboard())
+        return
+
+    try:
+        status = await app_context.access_control_service.redeem_token(
+            token=context.args[0],
+            user_id=update.effective_user.id,
+            username=update.effective_user.username,
+        )
+    except AccessDeniedError as exc:
+        await _reply(update, str(exc), reply_markup=build_main_menu_keyboard())
+        return
+
+    await _reply(
+        update,
+        "Access activated.\n\n" + format_quota_status(status),
+        reply_markup=build_main_menu_keyboard(),
+    )
+
+
+async def quota_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /quota."""
+
+    app_context = _app_context(context)
+    if update.effective_user is None:
+        return
+
+    status = await app_context.access_control_service.get_user_status(
+        user_id=update.effective_user.id,
+        username=update.effective_user.username,
+    )
+    if status is None:
+        await _reply(
+            update,
+            "No access is active for your account yet. Ask admin for a token and use /redeem TOKEN.",
+            reply_markup=build_main_menu_keyboard(),
+        )
+        return
+
+    await _reply(
+        update,
+        format_quota_status(status, is_admin=_is_admin(update, app_context)),
+        reply_markup=build_main_menu_keyboard(),
+    )
+
+
+async def grant_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /grant <daily_limit> for admins."""
+
+    app_context = _app_context(context)
+    if not _is_admin(update, app_context):
+        await _reply(update, "You are not allowed to manage access.")
+        return
+    if update.effective_user is None:
+        return
+    if not context.args:
+        await _reply(update, "Usage: /grant 20")
+        return
+
+    try:
+        daily_limit = int(context.args[0])
+    except ValueError:
+        await _reply(update, "Daily limit must be an integer.")
+        return
+
+    try:
+        record = await app_context.access_control_service.issue_token(
+            daily_limit=daily_limit,
+            issued_by=update.effective_user.id,
+        )
+    except ValueError as exc:
+        await _reply(update, str(exc))
+        return
+
+    await _reply(update, format_access_token(record), reply_markup=build_main_menu_keyboard())
+
+
+async def setquota_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /setquota <user_id> <daily_limit> for admins."""
+
+    app_context = _app_context(context)
+    if not _is_admin(update, app_context):
+        await _reply(update, "You are not allowed to manage access.")
+        return
+    if len(context.args) < 2:
+        await _reply(update, "Usage: /setquota 123456789 20")
+        return
+
+    try:
+        user_id = int(context.args[0])
+        daily_limit = int(context.args[1])
+    except ValueError:
+        await _reply(update, "User ID and daily limit must be integers.")
+        return
+
+    try:
+        status = await app_context.access_control_service.set_user_quota(
+            user_id=user_id,
+            daily_limit=daily_limit,
+        )
+    except ValueError as exc:
+        await _reply(update, str(exc))
+        return
+
+    await _reply(
+        update,
+        "User quota updated.\n\n" + format_quota_status(status),
+        reply_markup=build_main_menu_keyboard(),
+    )
+
+
+async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /users for admins."""
+
+    app_context = _app_context(context)
+    if not _is_admin(update, app_context):
+        await _reply(update, "You are not allowed to manage access.")
+        return
+
+    statuses = await app_context.access_control_service.list_user_statuses()
+    await _reply(update, format_user_quota_statuses(statuses), reply_markup=build_main_menu_keyboard())
+
+
+async def disableuser_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /disableuser <user_id> for admins."""
+
+    app_context = _app_context(context)
+    if not _is_admin(update, app_context):
+        await _reply(update, "You are not allowed to manage access.")
+        return
+    if not context.args:
+        await _reply(update, "Usage: /disableuser 123456789")
+        return
+
+    try:
+        user_id = int(context.args[0])
+    except ValueError:
+        await _reply(update, "User ID must be an integer.")
+        return
+
+    disabled = await app_context.access_control_service.deactivate_user(user_id)
+    if not disabled:
+        await _reply(update, "No managed user found with that ID.", reply_markup=build_main_menu_keyboard())
+        return
+
+    await _reply(
+        update,
+        f"User {user_id} has been disabled.",
+        reply_markup=build_main_menu_keyboard(),
+    )
 
 
 async def account_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -462,16 +665,30 @@ async def watch_job_callback(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     app_context = _app_context(context)
     chat_id = int(context.job.data["chat_id"])
+    user_id = int(context.job.data["user_id"])
     pair = str(context.job.data["pair"])
 
     try:
+        await app_context.access_control_service.ensure_can_request(user_id=user_id)
         signal = await app_context.signal_service.get_signal(pair)
+        await app_context.access_control_service.consume_request(user_id=user_id)
         await context.bot.send_message(
             chat_id=chat_id,
             text=format_signal_message(
                 signal,
                 app_context.settings.display_timezone,
                 app_context.settings.broker_style,
+            ),
+        )
+    except (AccessDeniedError, QuotaExceededError) as exc:
+        logger.info("Stopping watch for chat=%s pair=%s: %s", chat_id, pair, exc)
+        context.job.schedule_removal()
+        await app_context.subscription_service.remove(chat_id, pair)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"چاودێری بۆ {app_context.signal_service.display_pair(pair)} وەستاندرا "
+                f"چونکە {_access_error_message(exc)}"
             ),
         )
     except Exception:
@@ -503,6 +720,7 @@ async def restore_watch_jobs(application: Application, app_context: AppContext) 
         _schedule_watch_job(
             application=application,
             chat_id=record.chat_id,
+            user_id=record.user_id or record.chat_id,
             pair=record.pair,
             interval_seconds=record.interval_seconds,
         )
@@ -531,6 +749,7 @@ def _job_name(chat_id: int, pair: str) -> str:
 def _schedule_watch_job(
     application: Application,
     chat_id: int,
+    user_id: int,
     pair: str,
     interval_seconds: int,
 ) -> None:
@@ -546,7 +765,7 @@ def _schedule_watch_job(
         interval=interval_seconds,
         first=interval_seconds,
         name=job_name,
-        data={"chat_id": chat_id, "pair": pair},
+        data={"chat_id": chat_id, "user_id": user_id, "pair": pair},
     )
 
 
@@ -558,8 +777,22 @@ async def _send_signal_from_callback(
 ) -> None:
     """Send a one-time signal after a pair was selected from the inline keyboard."""
 
+    if query.from_user is None:
+        return
+
     try:
+        await app_context.access_control_service.ensure_can_request(
+            user_id=query.from_user.id,
+            username=query.from_user.username,
+        )
         signal = await app_context.signal_service.get_signal(pair)
+        await app_context.access_control_service.consume_request(
+            user_id=query.from_user.id,
+            username=query.from_user.username,
+        )
+    except (AccessDeniedError, QuotaExceededError) as exc:
+        await query.edit_message_text(_access_error_message(exc))
+        return
     except Exception:
         logger.exception("Signal callback failed")
         await query.edit_message_text("دروستکردنی ئاماژە سەرکەوتوو نەبوو. دواتر هەوڵبدەرەوە.")
@@ -593,7 +826,18 @@ async def _start_watch_from_callback(
         return
 
     try:
+        await app_context.access_control_service.ensure_can_request(
+            user_id=query.from_user.id,
+            username=query.from_user.username,
+        )
         signal = await app_context.signal_service.get_signal(pair)
+        await app_context.access_control_service.consume_request(
+            user_id=query.from_user.id,
+            username=query.from_user.username,
+        )
+    except (AccessDeniedError, QuotaExceededError) as exc:
+        await query.edit_message_text(_access_error_message(exc))
+        return
     except Exception:
         logger.exception("Watch callback failed")
         await query.edit_message_text("دەستپێکردنی چاودێری سەرکەوتوو نەبوو. دواتر هەوڵبدەرەوە.")
@@ -605,7 +849,13 @@ async def _start_watch_from_callback(
         pair=pair,
         interval_seconds=interval_seconds,
     )
-    _schedule_watch_job(context.application, query.message.chat.id, pair, interval_seconds)
+    _schedule_watch_job(
+        context.application,
+        query.message.chat.id,
+        query.from_user.id,
+        pair,
+        interval_seconds,
+    )
 
     await query.edit_message_text(
         f"{app_context.signal_service.display_pair(pair)} هەموو {interval_seconds} چرکە چاودێری دەکرێت."
@@ -718,3 +968,16 @@ def _is_admin(update: Update, app_context: AppContext) -> bool:
     if update.effective_user is None:
         return False
     return update.effective_user.id in app_context.settings.admin_telegram_user_ids
+
+
+def _access_error_message(exc: Exception) -> str:
+    """Translate access-control errors into concise Telegram text."""
+
+    if isinstance(exc, QuotaExceededError):
+        return (
+            f"ئەمڕۆ سنووری داواکارییەکانت تەواوبووە "
+            f"({exc.status.used_today}/{exc.status.daily_limit})."
+        )
+    if isinstance(exc, AccessDeniedError):
+        return str(exc)
+    return "Access request failed."

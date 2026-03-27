@@ -3,6 +3,7 @@
 from typing import Iterable, List
 from zoneinfo import ZoneInfo
 
+from app.models.access import AccessTokenRecord, UserQuotaStatus
 from app.models.signal import SignalLabel, SignalResponse, SubscriptionRecord
 from app.models.trading import (
     AccountSummary,
@@ -115,6 +116,8 @@ def format_help_message(default_interval_seconds: int) -> str:
             f"/watch EURUSD [{default_interval_seconds}] - چاودێریی دووبارە",
             "/stopwatch EURUSD - وەستاندنی نوێکردنەوەی جووتێک",
             "/status - پیشاندانی چاودێرییە چالاکەکان",
+            "/redeem TOKEN - چالاککردنی چوونەژوورەوەی بۆت",
+            "/quota - پیشاندانی سنووری داواکاریی ئەمڕۆ",
         ]
     )
 
@@ -203,6 +206,63 @@ def format_close_position_response(response: ClosePositionResponse) -> str:
             f"Message: {response.message}",
         ]
     )
+
+
+def format_access_token(record: AccessTokenRecord) -> str:
+    """Render an admin-issued access token."""
+
+    return "\n".join(
+        [
+            "🔐 New access token created",
+            f"Token: {record.token}",
+            f"Daily requests: {record.daily_limit}",
+            "Share it with the user and tell them to run /redeem TOKEN",
+        ]
+    )
+
+
+def format_quota_status(status: UserQuotaStatus, is_admin: bool = False) -> str:
+    """Render the current per-day quota status for a single user."""
+
+    if is_admin:
+        return "\n".join(
+            [
+                "👑 Admin access",
+                "Daily requests: unlimited",
+                "Remaining today: unlimited",
+            ]
+        )
+
+    username = f"@{status.username}" if status.username else "-"
+    granted_via = status.granted_via_token or "direct"
+    state = "active" if status.is_active else "disabled"
+    return "\n".join(
+        [
+            f"🪪 User: {status.user_id}",
+            f"Username: {username}",
+            f"State: {state}",
+            f"Daily requests: {status.daily_limit}",
+            f"Used today: {status.used_today}",
+            f"Remaining today: {status.remaining_today}",
+            f"Granted via: {granted_via}",
+        ]
+    )
+
+
+def format_user_quota_statuses(statuses: List[UserQuotaStatus]) -> str:
+    """Render a compact admin overview of all granted users."""
+
+    if not statuses:
+        return "No managed users yet."
+
+    lines = ["👥 Managed users:"]
+    for status in statuses:
+        username = f" @{status.username}" if status.username else ""
+        state = "active" if status.is_active else "disabled"
+        lines.append(
+            f"- {status.user_id}{username} | {state} | {status.used_today}/{status.daily_limit} used | {status.remaining_today} left"
+        )
+    return "\n".join(lines)
 
 
 def _format_signal_label(label: SignalLabel) -> str:

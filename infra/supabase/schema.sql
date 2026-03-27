@@ -31,3 +31,32 @@ create table if not exists trade_records (
 
 create index if not exists idx_trade_records_created_at on trade_records (created_at desc);
 create index if not exists idx_trade_records_pair on trade_records (pair);
+
+create table if not exists access_tokens (
+    token text primary key,
+    daily_limit integer not null check (daily_limit > 0),
+    issued_by bigint not null,
+    issued_at timestamptz not null default now(),
+    redeemed_by bigint unique,
+    redeemed_at timestamptz,
+    is_active boolean not null default true
+);
+
+create table if not exists bot_user_access (
+    user_id bigint primary key,
+    username text,
+    daily_limit integer not null check (daily_limit > 0),
+    is_active boolean not null default true,
+    granted_via_token text references access_tokens(token) on delete set null,
+    granted_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
+create table if not exists bot_user_daily_usage (
+    user_id bigint not null references bot_user_access(user_id) on delete cascade,
+    usage_date date not null,
+    request_count integer not null default 0,
+    primary key (user_id, usage_date)
+);
+
+create index if not exists idx_bot_user_daily_usage_date on bot_user_daily_usage (usage_date desc);
